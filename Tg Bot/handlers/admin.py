@@ -1,28 +1,14 @@
-import asyncio
 import html
 from datetime import datetime, timezone
 
-from aiogram import Bot, F, Router
-from aiogram.filters import Command
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
+from telegram import Update
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 import database as db
 import keyboards as kb
-from config import ADMIN_IDS
-from utils import count_entities, run_broadcast, safe_edit
-
-router = Router(name="admin")
-router.message.filter(F.from_user.id.in_(ADMIN_IDS))
-router.callback_query.filter(F.from_user.id.in_(ADMIN_IDS))
+from utils import ADMIN, admin_only, count_entities, run_broadcast, safe_edit, send_panel, set_state, to_ptb
 
 MODE_NAMES = {"non": "Non Approve", "auto": "Auto Approve"}
-
-
-class Broadcast(StatesGroup):
-    waiting = State()
-    confirm = State()
 
 
 # ---------- screens ----------
@@ -73,35 +59,34 @@ async def stats_text() -> str:
 
 
 # ---------- commands ----------
-@router.message(Command("admin"))
-async def cmd_admin(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer(await home_text(), reply_markup=kb.main_menu())
+async def cmd_admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    ctx.user_data.clear()
+    await send_panel(ctx.bot, update.effective_chat.id, await home_text(), kb.main_menu())
 
 
-@router.message(Command("cancel"))
-async def cmd_cancel(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer("❌ Cancelled.\n\n" + await home_text(), reply_markup=kb.main_menu())
+async def cmd_cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    ctx.user_data.clear()
+    await send_panel(ctx.bot, update.effective_chat.id, "❌ Cancelled.\n\n" + await home_text(), kb.main_menu())
 
 
-@router.callback_query(F.data.in_({"adm:home", "adm:cancel"}))
-async def cb_home(cb: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await safe_edit(cb.message, await home_text(), kb.main_menu())
-    await cb.answer()
+@admin_only
+async def cb_home(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    ctx.user_data.clear()
+    await safe_edit(update.callback_query.message, await home_text(), kb.main_menu())
+    await update.callback_query.answer()
 
 
 # ---------- approve mode ----------
-@router.callback_query(F.data == "adm:mode")
-async def cb_mode(cb: CallbackQuery):
+@admin_only
+async def cb_mode(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     mode = await db.get_setting("approve_mode", "non")
-    await safe_edit(cb.message, await mode_text(mode), kb.mode_menu(mode))
-    await cb.answer()
+    await safe_edit(update.callback_query.message, await mode_text(mode), kb.mode_menu(mode))
+    await update.callback_query.answer()
 
 
-@router.callback_query(F.data.in_({"mode:non", "mode:auto"}))
-async def cb_set_mode(cb: CallbackQuery):
+@admin_only
+async def cb_set_mode(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
     mode = cb.data.split(":")[1]
     await db.set_setting("approve_mode", mode)
     await safe_edit(cb.message, await mode_text(mode), kb.mode_menu(mode))
@@ -109,22 +94,22 @@ async def cb_set_mode(cb: CallbackQuery):
 
 
 # ---------- broadcast ----------
-@router.callback_query(F.data == "adm:bc")
-async def cb_broadcast(cb: CallbackQuery):
+@admin_only
+async def cb_broadcast(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     counts = {p: await db.count_users(p) for p in db.PERIODS}
     await safe_edit(
-        cb.message,
+        update.callback_query.message,
         "📢 <b>Broadcast</b>\n\nSelect which users should receive the message 👇",
         kb.broadcast_menu(counts),
     )
-    await cb.answer()
+    await update.callback_query.answer()
 
 
-@router.callback_query(F.data.in_({f"bc:{p}" for p in db.PERIODS}))
-async def cb_bc_period(cb: CallbackQuery, state: FSMContext):
+@admin_only
+async def cb_bc_period(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
     period = cb.data.split(":")[1]
-    await state.set_state(Broadcast.waiting)
-    await state.update_data(period=period)
+    set_state(ctx, "bc_wait", period=period)
     await safe_edit(
         cb.message,
         f"📢 <b>Broadcast → {db.PERIOD_LABELS[period]} Users</b>\n\n"
@@ -135,40 +120,68 @@ async def cb_bc_period(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-@router.message(Broadcast.waiting)
-async def on_bc_message(message: Message, state: FSMContext):
-    data = await state.get_data()
-    total = await db.count_users(data["period"])
-    await state.update_data(from_chat=message.chat.id, msg_id=message.message_id)
-    await state.set_state(Broadcast.confirm)
-    await message.reply(
-        f"👆 This message will be sent to <b>{total}</b> users ({db.PERIOD_LABELS[data['period']]}).\n"
+async def on_bc_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    period = ctx.user_data["period"]
+    total = await db.count_users(period)
+    set_state(ctx, "bc_confirm", from_chat=message.chat_id, msg_id=message.message_id)
+    await message.reply_text(
+        f"👆 This message will be sent to <b>{total}</b> users ({db.PERIOD_LABELS[period]}).\n"
         f"✨ Premium emoji: <b>{count_entities(message)}</b>\n\nConfirm?",
-        reply_markup=kb.confirm_broadcast(),
+        reply_markup=to_ptb(kb.confirm_broadcast()),
+        do_quote=True,
     )
 
 
-@router.callback_query(Broadcast.confirm, F.data == "bc:go")
-async def cb_bc_go(cb: CallbackQuery, state: FSMContext, bot: Bot):
-    data = await state.get_data()
-    await state.clear()
+@admin_only
+async def cb_bc_go(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
+    data = dict(ctx.user_data)
+    if data.get("state") != "bc_confirm":
+        await cb.answer()
+        return
+    ctx.user_data.clear()
     await safe_edit(cb.message, "🚀 Broadcast started...")
-    asyncio.create_task(run_broadcast(bot, cb.message.chat.id, data["from_chat"], data["msg_id"], data["period"]))
+    ctx.application.create_task(
+        run_broadcast(ctx.bot, cb.message.chat.id, data["from_chat"], data["msg_id"], data["period"])
+    )
     await cb.answer()
 
 
 # ---------- statistics ----------
-@router.callback_query(F.data == "adm:stats")
-async def cb_stats(cb: CallbackQuery):
-    await safe_edit(cb.message, await stats_text(), kb.stats_menu())
-    await cb.answer("🔄 Updated")
+@admin_only
+async def cb_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await safe_edit(update.callback_query.message, await stats_text(), kb.stats_menu())
+    await update.callback_query.answer("🔄 Updated")
 
 
 # ---------- channels ----------
-@router.callback_query(F.data == "adm:channels")
-async def cb_channels(cb: CallbackQuery):
+@admin_only
+async def cb_channels(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     rows = await db.list_channels()
     body = "\n".join(f"• <b>{html.escape(r['title'] or 'Untitled')}</b> (<code>{r['chat_id']}</code>)" for r in rows)
     text = "📡 <b>Channels (bot admin)</b>\n\n" + (body or "No channels yet. Make the bot an admin in your channel.")
-    await safe_edit(cb.message, text, kb.back_menu())
-    await cb.answer()
+    await safe_edit(update.callback_query.message, text, kb.back_menu())
+    await update.callback_query.answer()
+
+
+STATES = {"bc_wait": on_bc_message}
+
+
+def register_commands(app: Application) -> None:
+    app.add_handler(CommandHandler("admin", cmd_admin, filters=ADMIN))
+    app.add_handler(CommandHandler("cancel", cmd_cancel, filters=ADMIN))
+
+
+def register_callbacks(app: Application) -> None:
+    periods = "|".join(db.PERIODS)
+    app.add_handlers([
+        CallbackQueryHandler(cb_home, pattern=r"^adm:(home|cancel)$"),
+        CallbackQueryHandler(cb_mode, pattern=r"^adm:mode$"),
+        CallbackQueryHandler(cb_set_mode, pattern=r"^mode:(non|auto)$"),
+        CallbackQueryHandler(cb_broadcast, pattern=r"^adm:bc$"),
+        CallbackQueryHandler(cb_bc_period, pattern=rf"^bc:({periods})$"),
+        CallbackQueryHandler(cb_bc_go, pattern=r"^bc:go$"),
+        CallbackQueryHandler(cb_stats, pattern=r"^adm:stats$"),
+        CallbackQueryHandler(cb_channels, pattern=r"^adm:channels$"),
+    ])

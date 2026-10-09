@@ -1,52 +1,70 @@
-import asyncio
 import logging
 
-from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand, BotCommandScopeChat
+from telegram import BotCommand, BotCommandScopeChat, LinkPreviewOptions, Update
+from telegram.constants import ParseMode
+from telegram.error import TelegramError
+from telegram.ext import Application, ContextTypes, Defaults, MessageHandler
 
 import database as db
 from config import ADMIN_IDS, BOT_TOKEN, DATABASE_URL
 from handlers import admin, join, user, wlc
+from utils import ADMIN
+
+STATES = {**admin.STATES, **wlc.STATES}
 
 
-async def set_commands(bot: Bot) -> None:
-    await bot.set_my_commands([BotCommand(command="start", description="Start the bot")])
+async def on_state(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    handler = STATES.get(ctx.user_data.get("state"))
+    if handler:
+        await handler(update, ctx)
+
+
+async def set_commands(app: Application) -> None:
+    bot = app.bot
+    await bot.set_my_commands([BotCommand("start", "Start the bot")])
     for admin_id in ADMIN_IDS:
         try:
             await bot.set_my_commands(
                 [
-                    BotCommand(command="start", description="Start the bot"),
-                    BotCommand(command="admin", description="Open admin panel"),
-                    BotCommand(command="cancel", description="Cancel current action"),
+                    BotCommand("start", "Start the bot"),
+                    BotCommand("admin", "Open admin panel"),
+                    BotCommand("cancel", "Cancel current action"),
                 ],
                 scope=BotCommandScopeChat(chat_id=admin_id),
             )
-        except Exception:
+        except TelegramError:
             logging.warning("Admin %s hasn't started the bot yet", admin_id)
 
 
-async def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+async def post_init(app: Application) -> None:
     await db.connect(DATABASE_URL)
-    bot = Bot(
-        BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML, link_preview_is_disabled=True),
+    await set_commands(app)
+    logging.info("Bot @%s started", app.bot.username)
+
+
+async def post_shutdown(app: Application) -> None:
+    await db.close()
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .defaults(Defaults(parse_mode=ParseMode.HTML, link_preview_options=LinkPreviewOptions(is_disabled=True)))
+        .post_init(post_init)
+        .post_shutdown(post_shutdown)
+        .build()
     )
-    dp = Dispatcher(storage=MemoryStorage())
-    dp.include_routers(admin.router, wlc.router, join.router, user.router)
-    await set_commands(bot)
-    await bot.delete_webhook(drop_pending_updates=False)
-    me = await bot.get_me()
-    logging.info("Bot @%s started", me.username)
-    try:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-    finally:
-        await db.close()
-        await bot.session.close()
+    admin.register_commands(app)
+    user.register(app)
+    admin.register_callbacks(app)
+    wlc.register_callbacks(app)
+    app.add_handler(MessageHandler(ADMIN, on_state))
+    join.register(app)
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

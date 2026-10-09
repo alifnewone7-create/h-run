@@ -1,29 +1,26 @@
 import html
 import re
 
-from aiogram import Bot, F, Router
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
+from telegram import CallbackQuery, Message, Update
+from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 
 import database as db
 import keyboards as kb
-from config import ADMIN_IDS
 from utils import (
+    admin_only,
     button_label,
     count_tg_emoji,
     extract_media,
+    html_text,
     make_button,
     parse_button_name,
     render,
     safe_edit,
     send_custom,
     send_panel,
+    set_state,
+    to_ptb,
 )
-
-router = Router(name="wlc")
-router.message.filter(F.from_user.id.in_(ADMIN_IDS))
-router.callback_query.filter(F.from_user.id.in_(ADMIN_IDS))
 
 KINDS = {"start": "Start Msg", "welcome": "Wlc Msg"}
 DESC = {
@@ -33,13 +30,6 @@ DESC = {
 VARS_HELP = "<code>{first_name}</code>  <code>{username}</code>  <code>{channel}</code>"
 MAX_BUTTONS = 20
 URL_RE = re.compile(r"^(https?|tg)://\S+$")
-
-
-class Wlc(StatesGroup):
-    text = State()
-    media = State()
-    btn_name = State()
-    btn_url = State()
 
 
 def _args(cb: CallbackQuery) -> list[str]:
@@ -76,12 +66,15 @@ def button_info(kind: str, i: int, b: dict) -> str:
     )
 
 
-async def show_kind(target: Message, kind: str, edit: bool = True) -> None:
-    cfg = await db.get_msg(kind)
+async def _show(target: Message, text: str, markup, edit: bool) -> None:
     if edit:
-        await safe_edit(target, summary(kind, cfg), kb.kind_menu(kind))
+        await safe_edit(target, text, markup)
     else:
-        await send_panel(target.bot, target.chat.id, summary(kind, cfg), kb.kind_menu(kind))
+        await send_panel(target.get_bot(), target.chat.id, text, markup)
+
+
+async def show_kind(target: Message, kind: str, edit: bool = True) -> None:
+    await _show(target, summary(kind, await db.get_msg(kind)), kb.kind_menu(kind), edit)
 
 
 async def show_buttons(target: Message, kind: str, edit: bool = True) -> None:
@@ -90,20 +83,12 @@ async def show_buttons(target: Message, kind: str, edit: bool = True) -> None:
         f"🔘 <b>{KINDS[kind]} – Buttons</b> ({len(cfg['buttons'])}/{MAX_BUTTONS})\n\n"
         "Tap a button to edit or delete it, or add a new one."
     )
-    markup = kb.buttons_list(kind, [button_label(b) for b in cfg["buttons"]])
-    if edit:
-        await safe_edit(target, text, markup)
-    else:
-        await send_panel(target.bot, target.chat.id, text, markup)
+    await _show(target, text, kb.buttons_list(kind, [button_label(b) for b in cfg["buttons"]]), edit)
 
 
 async def show_button(target: Message, kind: str, i: int, edit: bool = True) -> None:
     b = (await db.get_msg(kind))["buttons"][i]
-    markup = kb.button_menu(kind, i, make_button(b))
-    if edit:
-        await safe_edit(target, button_info(kind, i, b), markup)
-    else:
-        await send_panel(target.bot, target.chat.id, button_info(kind, i, b), markup)
+    await _show(target, button_info(kind, i, b), kb.button_menu(kind, i, make_button(b)), edit)
 
 
 async def _button_or_alert(cb: CallbackQuery, kind: str, i: int) -> dict | None:
@@ -116,29 +101,36 @@ async def _button_or_alert(cb: CallbackQuery, kind: str, i: int) -> dict | None:
 
 
 # ---------- menus ----------
-@router.callback_query(F.data == "adm:wlc")
-async def cb_wlc(cb: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await safe_edit(cb.message, "👋 <b>Wlc Setting</b>\n\nChoose which message you want to customize 👇", kb.wlc_menu())
-    await cb.answer()
+@admin_only
+async def cb_wlc(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    ctx.user_data.clear()
+    await safe_edit(
+        update.callback_query.message,
+        "👋 <b>Wlc Setting</b>\n\nChoose which message you want to customize 👇",
+        kb.wlc_menu(),
+    )
+    await update.callback_query.answer()
 
 
-@router.callback_query(F.data.in_({"cfg:start", "cfg:welcome"}))
-async def cb_kind(cb: CallbackQuery, state: FSMContext):
-    await state.clear()
+@admin_only
+async def cb_kind(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
+    ctx.user_data.clear()
     await show_kind(cb.message, _args(cb)[0])
     await cb.answer()
 
 
-@router.callback_query(F.data.startswith("prv:"))
-async def cb_preview(cb: CallbackQuery, bot: Bot):
+@admin_only
+async def cb_preview(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
     kind = _args(cb)[0]
-    await send_custom(bot, cb.message.chat.id, await db.get_msg(kind), cb.from_user, "Demo Channel")
+    await send_custom(ctx.bot, cb.message.chat.id, await db.get_msg(kind), cb.from_user, "Demo Channel")
     await cb.answer("👁 Preview sent")
 
 
-@router.callback_query(F.data.startswith("rst:"))
-async def cb_reset(cb: CallbackQuery):
+@admin_only
+async def cb_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
     kind = _args(cb)[0]
     await db.reset_msg(kind)
     await show_kind(cb.message, kind)
@@ -146,12 +138,12 @@ async def cb_reset(cb: CallbackQuery):
 
 
 # ---------- text ----------
-@router.callback_query(F.data.startswith("txt:"))
-async def cb_text(cb: CallbackQuery, state: FSMContext):
+@admin_only
+async def cb_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
     kind = _args(cb)[0]
     cfg = await db.get_msg(kind)
-    await state.set_state(Wlc.text)
-    await state.update_data(kind=kind)
+    set_state(ctx, "wlc_text", kind=kind)
     await safe_edit(
         cb.message,
         f"📝 <b>{KINDS[kind]} – Set Text</b>\n\nCurrent text:\n━━━━━━━━━━━━\n"
@@ -163,28 +155,28 @@ async def cb_text(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-@router.message(Wlc.text)
-async def on_text(message: Message, state: FSMContext):
+async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
     if not message.text:
-        await message.answer("⚠️ Please send a text message.")
+        await message.reply_text("⚠️ Please send a text message.")
         return
-    kind = (await state.get_data())["kind"]
+    kind = ctx.user_data["kind"]
     cfg = await db.get_msg(kind)
-    cfg["text"] = message.html_text
+    cfg["text"] = html_text(message)
     await db.set_msg(kind, cfg)
-    await state.clear()
-    await message.answer("✅ Text saved!")
+    ctx.user_data.clear()
+    await message.reply_text("✅ Text saved!")
     await show_kind(message, kind, edit=False)
 
 
 # ---------- media ----------
-@router.callback_query(F.data.startswith("med:"))
-async def cb_media(cb: CallbackQuery, state: FSMContext):
+@admin_only
+async def cb_media(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
     kind = _args(cb)[0]
     cfg = await db.get_msg(kind)
     current = cfg["media"]["type"].title() if cfg["media"] else "None"
-    await state.set_state(Wlc.media)
-    await state.update_data(kind=kind)
+    set_state(ctx, "wlc_media", kind=kind)
     await safe_edit(
         cb.message,
         f"🖼 <b>{KINDS[kind]} – Set Media</b>\n\nCurrent media: <b>{current}</b>\n\n"
@@ -196,50 +188,52 @@ async def cb_media(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-@router.callback_query(F.data.startswith("medr:"))
-async def cb_media_remove(cb: CallbackQuery, state: FSMContext):
+@admin_only
+async def cb_media_remove(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
     kind = _args(cb)[0]
     cfg = await db.get_msg(kind)
     cfg["media"] = None
     await db.set_msg(kind, cfg)
-    await state.clear()
+    ctx.user_data.clear()
     await show_kind(cb.message, kind)
     await cb.answer("🗑 Media removed")
 
 
-@router.message(Wlc.media)
-async def on_media(message: Message, state: FSMContext):
+async def on_media(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
     media = extract_media(message)
     if not media:
-        await message.answer("⚠️ Please send a photo, video, audio, GIF, voice or document.")
+        await message.reply_text("⚠️ Please send a photo, video, audio, GIF, voice or document.")
         return
-    kind = (await state.get_data())["kind"]
+    kind = ctx.user_data["kind"]
     cfg = await db.get_msg(kind)
     cfg["media"] = media
     if message.caption:
-        cfg["text"] = message.html_text
+        cfg["text"] = html_text(message)
     await db.set_msg(kind, cfg)
-    await state.clear()
-    await message.answer(f"✅ {media['type'].title()} saved!")
+    ctx.user_data.clear()
+    await message.reply_text(f"✅ {media['type'].title()} saved!")
     await show_kind(message, kind, edit=False)
 
 
 # ---------- buttons ----------
-@router.callback_query(F.data.startswith("btn:"))
-async def cb_buttons(cb: CallbackQuery, state: FSMContext):
-    await state.clear()
+@admin_only
+async def cb_buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
+    ctx.user_data.clear()
     await show_buttons(cb.message, _args(cb)[0])
     await cb.answer()
 
 
-@router.callback_query(F.data.startswith("bta:"))
-async def cb_button_add(cb: CallbackQuery, state: FSMContext):
+@admin_only
+async def cb_button_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
     kind = _args(cb)[0]
     if len((await db.get_msg(kind))["buttons"]) >= MAX_BUTTONS:
         await cb.answer(f"Maximum {MAX_BUTTONS} buttons", show_alert=True)
         return
-    await state.set_state(Wlc.btn_name)
-    await state.update_data(kind=kind, idx=None)
+    set_state(ctx, "btn_name", kind=kind, idx=None)
     await safe_edit(
         cb.message,
         "➕ <b>New Button – Step 1/3</b>\n\nSend the button name.\n"
@@ -249,23 +243,24 @@ async def cb_button_add(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-@router.callback_query(F.data.startswith("bte:"))
-async def cb_button_edit(cb: CallbackQuery, state: FSMContext):
+@admin_only
+async def cb_button_edit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
     kind, i = _args(cb)
-    await state.clear()
+    ctx.user_data.clear()
     if await _button_or_alert(cb, kind, int(i)):
         await show_button(cb.message, kind, int(i))
         await cb.answer()
 
 
-@router.callback_query(F.data.startswith("bten:") | F.data.startswith("btel:"))
-async def cb_button_field(cb: CallbackQuery, state: FSMContext):
+@admin_only
+async def cb_button_field(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
     action = cb.data.split(":")[0]
     kind, i = _args(cb)
     if not await _button_or_alert(cb, kind, int(i)):
         return
-    await state.set_state(Wlc.btn_name if action == "bten" else Wlc.btn_url)
-    await state.update_data(kind=kind, idx=int(i))
+    set_state(ctx, "btn_name" if action == "bten" else "btn_url", kind=kind, idx=int(i))
     prompt = (
         "✏️ Send the new button name (emoji and ✨ Premium emoji supported)."
         if action == "bten"
@@ -275,16 +270,18 @@ async def cb_button_field(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-@router.callback_query(F.data.startswith("btec:"))
-async def cb_button_color(cb: CallbackQuery):
+@admin_only
+async def cb_button_color(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
     kind, i = _args(cb)
     if await _button_or_alert(cb, kind, int(i)):
         await safe_edit(cb.message, "🎨 <b>Choose the button color</b>", kb.color_menu(kind, int(i)))
         await cb.answer()
 
 
-@router.callback_query(F.data.startswith("btc:"))
-async def cb_button_set_color(cb: CallbackQuery):
+@admin_only
+async def cb_button_set_color(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
     kind, i, style = _args(cb)
     cfg = await db.get_msg(kind)
     if int(i) >= len(cfg["buttons"]) or style not in kb.STYLES:
@@ -296,8 +293,9 @@ async def cb_button_set_color(cb: CallbackQuery):
     await cb.answer(f"Color: {kb.STYLES[style]}")
 
 
-@router.callback_query(F.data.startswith("btd:"))
-async def cb_button_delete(cb: CallbackQuery):
+@admin_only
+async def cb_button_delete(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
     kind, i = _args(cb)
     cfg = await db.get_msg(kind)
     if int(i) < len(cfg["buttons"]):
@@ -307,47 +305,72 @@ async def cb_button_delete(cb: CallbackQuery):
     await cb.answer("🗑 Button deleted")
 
 
-@router.message(Wlc.btn_name)
-async def on_button_name(message: Message, state: FSMContext):
+async def on_button_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
     if not message.text:
-        await message.answer("⚠️ Please send the button name as text.")
+        await message.reply_text("⚠️ Please send the button name as text.")
         return
     name, icon, alt = parse_button_name(message)
-    data = await state.get_data()
-    kind, idx = data["kind"], data["idx"]
+    kind, idx = ctx.user_data["kind"], ctx.user_data["idx"]
     if idx is None:
-        await state.update_data(name=name, icon=icon, alt=alt)
-        await state.set_state(Wlc.btn_url)
-        await message.answer(
+        set_state(ctx, "btn_url", name=name, icon=icon, alt=alt)
+        await message.reply_text(
             "🔗 <b>New Button – Step 2/3</b>\n\nSend the button link (https://... or t.me/...).",
-            reply_markup=kb.back_to(f"btn:{kind}"),
+            reply_markup=to_ptb(kb.back_to(f"btn:{kind}")),
         )
         return
     cfg = await db.get_msg(kind)
     cfg["buttons"][idx].update(text=name, icon=icon, alt=alt)
     await db.set_msg(kind, cfg)
-    await state.clear()
+    ctx.user_data.clear()
     await show_button(message, kind, idx, edit=False)
 
 
-@router.message(Wlc.btn_url)
-async def on_button_url(message: Message, state: FSMContext):
+async def on_button_url(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
     url = normalize_url(message.text or "")
     if not url:
-        await message.answer("⚠️ Invalid link. Example: <code>https://t.me/yourchannel</code>")
+        await message.reply_text("⚠️ Invalid link. Example: <code>https://t.me/yourchannel</code>")
         return
-    data = await state.get_data()
+    data = dict(ctx.user_data)
     kind, idx = data["kind"], data["idx"]
     cfg = await db.get_msg(kind)
-    await state.clear()
+    ctx.user_data.clear()
     if idx is None:
         cfg["buttons"].append({"text": data["name"], "icon": data["icon"], "alt": data["alt"], "url": url, "style": None})
         await db.set_msg(kind, cfg)
-        await message.answer(
+        await message.reply_text(
             "🎨 <b>New Button – Step 3/3</b>\n\nChoose the button color:",
-            reply_markup=kb.color_menu(kind, len(cfg["buttons"]) - 1),
+            reply_markup=to_ptb(kb.color_menu(kind, len(cfg["buttons"]) - 1)),
         )
         return
     cfg["buttons"][idx]["url"] = url
     await db.set_msg(kind, cfg)
     await show_button(message, kind, idx, edit=False)
+
+
+STATES = {
+    "wlc_text": on_text,
+    "wlc_media": on_media,
+    "btn_name": on_button_name,
+    "btn_url": on_button_url,
+}
+
+
+def register_callbacks(app: Application) -> None:
+    app.add_handlers([
+        CallbackQueryHandler(cb_wlc, pattern=r"^adm:wlc$"),
+        CallbackQueryHandler(cb_kind, pattern=r"^cfg:(start|welcome)$"),
+        CallbackQueryHandler(cb_preview, pattern=r"^prv:"),
+        CallbackQueryHandler(cb_reset, pattern=r"^rst:"),
+        CallbackQueryHandler(cb_text, pattern=r"^txt:"),
+        CallbackQueryHandler(cb_media, pattern=r"^med:"),
+        CallbackQueryHandler(cb_media_remove, pattern=r"^medr:"),
+        CallbackQueryHandler(cb_buttons, pattern=r"^btn:"),
+        CallbackQueryHandler(cb_button_add, pattern=r"^bta:"),
+        CallbackQueryHandler(cb_button_edit, pattern=r"^bte:"),
+        CallbackQueryHandler(cb_button_field, pattern=r"^bte[nl]:"),
+        CallbackQueryHandler(cb_button_color, pattern=r"^btec:"),
+        CallbackQueryHandler(cb_button_set_color, pattern=r"^btc:"),
+        CallbackQueryHandler(cb_button_delete, pattern=r"^btd:"),
+    ])

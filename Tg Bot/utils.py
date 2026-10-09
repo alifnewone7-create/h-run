@@ -2,20 +2,23 @@ import asyncio
 import html
 import logging
 import re
+from datetime import timedelta
+from functools import wraps
 
-from aiogram import Bot
-from aiogram.exceptions import (
-    TelegramAPIError,
-    TelegramBadRequest,
-    TelegramForbiddenError,
-    TelegramRetryAfter,
-)
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, User
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import MessageEntity as AioEntity
+from aiogram.utils.text_decorations import html_decoration
+from telegram import Bot, Message, Update, User
+from telegram import InlineKeyboardMarkup as PtbMarkup
+from telegram.error import BadRequest, Forbidden, RetryAfter, TelegramError
+from telegram.ext import ContextTypes, filters
 
 import database as db
+from config import ADMIN_IDS
 
 log = logging.getLogger(__name__)
 
+ADMIN = filters.User(user_id=ADMIN_IDS)
 TG_EMOJI = re.compile(r'<tg-emoji emoji-id="\d+">(.*?)</tg-emoji>', re.S)
 TAGS = re.compile(r"<[^>]+>")
 CAPTION_LIMIT = 1024
@@ -27,6 +30,33 @@ SENDERS = {
     "document": "send_document",
     "voice": "send_voice",
 }
+
+
+# ---------- admin / state ----------
+def admin_only(fn):
+    @wraps(fn)
+    async def wrapper(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if update.effective_user and update.effective_user.id in ADMIN_IDS:
+            return await fn(update, ctx)
+    return wrapper
+
+
+def set_state(ctx: ContextTypes.DEFAULT_TYPE, state: str, **data) -> None:
+    ctx.user_data.update(data, state=state)
+
+
+# ---------- aiogram bridge (premium emoji + coloured buttons) ----------
+def html_text(msg: Message) -> str:
+    # aiogram turns entities (incl. premium emoji) into HTML with <tg-emoji>
+    if msg.text is not None:
+        text, entities = msg.text, msg.entities
+    else:
+        text, entities = msg.caption or "", msg.caption_entities
+    return html_decoration.unparse(text, [AioEntity.model_validate(e.to_dict()) for e in entities])
+
+
+def to_ptb(kb: InlineKeyboardMarkup | None) -> PtbMarkup | None:
+    return PtbMarkup.de_json(kb.model_dump(exclude_none=True)) if kb else None
 
 
 # ---------- text helpers ----------
@@ -51,8 +81,7 @@ def strip_tg_emoji(html_text: str) -> str:
 
 
 def count_entities(msg: Message) -> int:
-    entities = (msg.entities or []) + (msg.caption_entities or [])
-    return sum(e.type == "custom_emoji" for e in entities)
+    return sum(e.type == "custom_emoji" for e in (*msg.entities, *msg.caption_entities))
 
 
 def _plain_len(html_text: str) -> int:
@@ -74,7 +103,7 @@ def extract_media(msg: Message) -> dict | None:
 def parse_button_name(msg: Message) -> tuple[str, str | None, str | None]:
     # first premium emoji becomes the button icon, the rest stays as plain text
     text = msg.text or ""
-    ce = next((e for e in msg.entities or [] if e.type == "custom_emoji"), None)
+    ce = next((e for e in msg.entities if e.type == "custom_emoji"), None)
     if not ce:
         return text.strip(), None, None
     raw = text.encode("utf-16-le")
@@ -111,7 +140,8 @@ def strip_icons(kb: InlineKeyboardMarkup | None) -> InlineKeyboardMarkup | None:
 
 
 # ---------- sending ----------
-async def _deliver(bot: Bot, chat_id: int, media: dict | None, text: str, markup) -> Message:
+async def _deliver(bot: Bot, chat_id: int, media: dict | None, text: str, kb) -> Message:
+    markup = to_ptb(kb)
     if not media:
         return await bot.send_message(chat_id, text, reply_markup=markup)
     send = getattr(bot, SENDERS[media["type"]])
@@ -125,28 +155,28 @@ async def send_custom(bot: Bot, chat_id: int, cfg: dict, user: User, channel: st
     text = render(cfg["text"], user, channel)
     try:
         return await _deliver(bot, chat_id, cfg.get("media"), text, build_markup(cfg["buttons"]))
-    except TelegramBadRequest as e:
+    except BadRequest as e:
         log.warning("Retrying without premium emoji (bot owner needs Telegram Premium): %s", e)
         return await _deliver(bot, chat_id, cfg.get("media"), strip_tg_emoji(text), build_markup(cfg["buttons"], False))
 
 
 async def send_panel(bot: Bot, chat_id: int, text: str, kb: InlineKeyboardMarkup | None = None) -> Message:
     try:
-        return await bot.send_message(chat_id, text, reply_markup=kb)
-    except TelegramBadRequest:
-        return await bot.send_message(chat_id, strip_tg_emoji(text), reply_markup=strip_icons(kb))
+        return await bot.send_message(chat_id, text, reply_markup=to_ptb(kb))
+    except BadRequest:
+        return await bot.send_message(chat_id, strip_tg_emoji(text), reply_markup=to_ptb(strip_icons(kb)))
 
 
 async def safe_edit(msg: Message, text: str, kb: InlineKeyboardMarkup | None = None) -> None:
     try:
-        await msg.edit_text(text, reply_markup=kb)
-    except TelegramBadRequest as e:
-        if "not modified" in str(e):
+        await msg.edit_text(text, reply_markup=to_ptb(kb))
+    except BadRequest as e:
+        if "not modified" in str(e).lower():
             return
         try:
-            await msg.edit_text(strip_tg_emoji(text), reply_markup=strip_icons(kb))
-        except TelegramBadRequest:
-            await send_panel(msg.bot, msg.chat.id, text, kb)
+            await msg.edit_text(strip_tg_emoji(text), reply_markup=to_ptb(strip_icons(kb)))
+        except BadRequest:
+            await send_panel(msg.get_bot(), msg.chat.id, text, kb)
 
 
 # ---------- broadcast ----------
@@ -154,15 +184,16 @@ async def _copy(bot: Bot, uid: int, from_chat: int, msg_id: int, retries: int = 
     try:
         await bot.copy_message(uid, from_chat, msg_id)
         return "sent"
-    except TelegramRetryAfter as e:
+    except RetryAfter as e:
         if retries == 0:
             return "failed"
-        await asyncio.sleep(e.retry_after + 1)
+        wait = e.retry_after
+        await asyncio.sleep((wait.total_seconds() if isinstance(wait, timedelta) else wait) + 1)
         return await _copy(bot, uid, from_chat, msg_id, retries - 1)
-    except TelegramForbiddenError:
+    except Forbidden:
         await db.set_blocked(uid)
         return "blocked"
-    except TelegramAPIError:
+    except TelegramError:
         return "failed"
 
 

@@ -1,4 +1,6 @@
-# Tg Bot – Join Request Bot (Aiogram 3 + Neon PostgreSQL)
+# Tg Bot – Join Request Bot (python-telegram-bot + Neon PostgreSQL)
+
+The whole bot runs on **python-telegram-bot**. **aiogram** is used only for Premium emoji (message → `<tg-emoji>` HTML) and coloured buttons (`style` / premium icon keyboards).
 
 When someone sends a join request to your private channel, the bot sends that user a message. The admin panel controls **Non Approve / Auto Approve**, **Text Set**, **Broadcast** and **Statistics**.
 
