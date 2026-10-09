@@ -1,7 +1,7 @@
 import html
 from datetime import datetime, timezone
 
-from telegram import Bot, Update
+from telegram import Bot, Message, Update
 from telegram.error import BadRequest, TelegramError
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
@@ -14,6 +14,7 @@ from utils import (
     build_markup,
     button_label,
     count_entities,
+    make_button,
     normalize_url,
     parse_button_name,
     run_broadcast,
@@ -150,15 +151,34 @@ async def cb_bc_audience(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 def _bc_buttons_text(buttons: list[dict]) -> str:
-    rows = "\n".join(
-        f"{i + 1}. <b>{html.escape(button_label(b))}</b> – {html.escape(b['url'])} ({kb.STYLES[b['style'] or 'none']})"
-        for i, b in enumerate(buttons)
+    hint = (
+        "Tap a button to edit or delete it, add a new one, or tap ✅ Done."
+        if buttons else "Add buttons under the broadcast message, or skip to send it without buttons."
     )
+    return f"🔘 <b>Broadcast Buttons</b> ({len(buttons)}/{MAX_BUTTONS})\n\n{hint}"
+
+
+def _bc_button_text(i: int, b: dict) -> str:
     return (
-        f"🔘 <b>Broadcast Buttons</b> ({len(buttons)}/{MAX_BUTTONS})\n\n"
-        + (rows + "\n\n" if rows else "")
-        + "Add buttons under the broadcast message, or skip to send it without buttons."
+        f"🔘 <b>Broadcast Button #{i + 1}</b>\n\n"
+        f"Name: <b>{html.escape(button_label(b))}</b>\n"
+        f"Link: {html.escape(b['url'])}\n"
+        f"Color: <b>{kb.STYLES[b['style'] or 'none']}</b>\n"
+        f"Premium icon: <b>{'Yes' if b['icon'] else 'No'}</b>\n\n"
+        "👆 This is how the button looks."
     )
+
+
+async def _show_bc(target: Message, ctx: ContextTypes.DEFAULT_TYPE, i: int | None = None, edit: bool = True) -> None:
+    buttons = ctx.user_data["buttons"]
+    if i is None:
+        text, markup = _bc_buttons_text(buttons), kb.bc_buttons_menu([button_label(b) for b in buttons])
+    else:
+        text, markup = _bc_button_text(i, buttons[i]), kb.bc_button_menu(i, make_button(buttons[i]))
+    if edit:
+        await safe_edit(target, text, markup)
+    else:
+        await send_panel(target.get_bot(), target.chat.id, text, markup)
 
 
 async def on_bc_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -167,7 +187,7 @@ async def on_bc_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx, "bc_buttons",
         from_chat=message.chat_id, msg_id=message.message_id, emoji=count_entities(message), buttons=[],
     )
-    await message.reply_text(_bc_buttons_text([]), reply_markup=to_ptb(kb.bc_buttons_menu(False)), do_quote=True)
+    await message.reply_text(_bc_buttons_text([]), reply_markup=to_ptb(kb.bc_buttons_menu([])), do_quote=True)
 
 
 def bc_session(fn):
@@ -180,15 +200,19 @@ def bc_session(fn):
     return wrapper
 
 
+async def _bc_index(cb, ctx: ContextTypes.DEFAULT_TYPE, i: int) -> bool:
+    if i < len(ctx.user_data["buttons"]):
+        return True
+    await cb.answer("Button not found", show_alert=True)
+    await _show_bc(cb.message, ctx)
+    return False
+
+
 @bc_session
 async def cb_bc_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    cb = update.callback_query
-    buttons = ctx.user_data["buttons"]
-    if cb.data == "bcb:undo" and buttons:
-        buttons.pop()
     ctx.user_data["state"] = "bc_buttons"
-    await safe_edit(cb.message, _bc_buttons_text(buttons), kb.bc_buttons_menu(bool(buttons)))
-    await cb.answer()
+    await _show_bc(update.callback_query.message, ctx)
+    await update.callback_query.answer()
 
 
 @bc_session
@@ -197,7 +221,7 @@ async def cb_bc_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if len(ctx.user_data["buttons"]) >= MAX_BUTTONS:
         await cb.answer(f"Maximum {MAX_BUTTONS} buttons", show_alert=True)
         return
-    ctx.user_data["state"] = "bc_btn_name"
+    set_state(ctx, "bc_btn_name", idx=None)
     await safe_edit(
         cb.message,
         "➕ <b>Broadcast Button – Step 1/3</b>\n\nSend the button name.\n"
@@ -207,17 +231,69 @@ async def cb_bc_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await cb.answer()
 
 
+@bc_session
+async def cb_bc_edit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
+    i = int(cb.data.split(":")[1])
+    if await _bc_index(cb, ctx, i):
+        ctx.user_data["state"] = "bc_buttons"
+        await _show_bc(cb.message, ctx, i)
+        await cb.answer()
+
+
+@bc_session
+async def cb_bc_field(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
+    action, i = cb.data.split(":")
+    if not await _bc_index(cb, ctx, int(i)):
+        return
+    set_state(ctx, "bc_btn_name" if action == "bcen" else "bc_btn_url", idx=int(i))
+    prompt = (
+        "✏️ Send the new button name (emoji and ✨ Premium emoji supported)."
+        if action == "bcen"
+        else "🔗 Send the new button link (https://... or t.me/...)."
+    )
+    await safe_edit(cb.message, prompt, kb.back_to(f"bce:{i}"))
+    await cb.answer()
+
+
+@bc_session
+async def cb_bc_color_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
+    i = int(cb.data.split(":")[1])
+    if await _bc_index(cb, ctx, i):
+        await safe_edit(cb.message, "🎨 <b>Choose the button color</b>", kb.color_menu(f"bcc:e:{i}", f"bce:{i}"))
+        await cb.answer()
+
+
+@bc_session
+async def cb_bc_delete(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
+    i = int(cb.data.split(":")[1])
+    if await _bc_index(cb, ctx, i):
+        ctx.user_data["buttons"].pop(i)
+        ctx.user_data["state"] = "bc_buttons"
+        await _show_bc(cb.message, ctx)
+        await cb.answer("🗑 Button deleted")
+
+
 async def on_bc_btn_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
     if not message.text:
         await message.reply_text("⚠️ Please send the button name as text.")
         return
     name, icon, alt = parse_button_name(message)
-    set_state(ctx, "bc_btn_url", btn={"text": name, "icon": icon, "alt": alt, "style": None})
-    await message.reply_text(
-        "🔗 <b>Broadcast Button – Step 2/3</b>\n\nSend the button link (https://... or t.me/...).",
-        reply_markup=to_ptb(kb.back_to("bcb:menu")),
-    )
+    idx = ctx.user_data.get("idx")
+    if idx is None:
+        set_state(ctx, "bc_btn_url", btn={"text": name, "icon": icon, "alt": alt, "style": None})
+        await message.reply_text(
+            "🔗 <b>Broadcast Button – Step 2/3</b>\n\nSend the button link (https://... or t.me/...).",
+            reply_markup=to_ptb(kb.back_to("bcb:menu")),
+        )
+        return
+    ctx.user_data["buttons"][idx].update(text=name, icon=icon, alt=alt)
+    ctx.user_data["state"] = "bc_buttons"
+    await _show_bc(message, ctx, idx, edit=False)
 
 
 async def on_bc_btn_url(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -226,23 +302,28 @@ async def on_bc_btn_url(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not url:
         await message.reply_text("⚠️ Invalid link. Example: <code>https://t.me/yourchannel</code>")
         return
-    ctx.user_data["buttons"].append({**ctx.user_data.pop("btn"), "url": url})
+    buttons, idx = ctx.user_data["buttons"], ctx.user_data.get("idx")
     ctx.user_data["state"] = "bc_buttons"
+    if idx is not None:
+        buttons[idx]["url"] = url
+        await _show_bc(message, ctx, idx, edit=False)
+        return
+    buttons.append({**ctx.user_data.pop("btn"), "url": url})
     await message.reply_text(
         "🎨 <b>Broadcast Button – Step 3/3</b>\n\nChoose the button color:",
-        reply_markup=to_ptb(kb.color_menu("bcc", "bcb:menu")),
+        reply_markup=to_ptb(kb.color_menu(f"bcc:n:{len(buttons) - 1}", "bcb:menu")),
     )
 
 
 @bc_session
 async def cb_bc_color(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cb = update.callback_query
-    style = cb.data.split(":")[1]
-    buttons = ctx.user_data["buttons"]
-    if buttons and style in kb.STYLES:
-        buttons[-1]["style"] = None if style == "none" else style
-    await safe_edit(cb.message, _bc_buttons_text(buttons), kb.bc_buttons_menu(bool(buttons)))
-    await cb.answer(f"Color: {kb.STYLES.get(style, '')}")
+    _, mode, i, style = cb.data.split(":")
+    if not await _bc_index(cb, ctx, int(i)) or style not in kb.STYLES:
+        return
+    ctx.user_data["buttons"][int(i)]["style"] = None if style == "none" else style
+    await _show_bc(cb.message, ctx, int(i) if mode == "e" else None)
+    await cb.answer(f"Color: {kb.STYLES[style]}")
 
 
 @bc_session
@@ -322,10 +403,14 @@ def register_callbacks(app: Application) -> None:
         CallbackQueryHandler(cb_broadcast, pattern=r"^adm:bc$"),
         CallbackQueryHandler(cb_bc_audience, pattern=rf"^bc:({audiences})$"),
         CallbackQueryHandler(cb_bc_go, pattern=r"^bc:go$"),
-        CallbackQueryHandler(cb_bc_menu, pattern=r"^bcb:(menu|undo)$"),
+        CallbackQueryHandler(cb_bc_menu, pattern=r"^bcb:menu$"),
         CallbackQueryHandler(cb_bc_add, pattern=r"^bcb:add$"),
         CallbackQueryHandler(cb_bc_done, pattern=r"^bcb:done$"),
-        CallbackQueryHandler(cb_bc_color, pattern=r"^bcc:"),
+        CallbackQueryHandler(cb_bc_edit, pattern=r"^bce:\d+$"),
+        CallbackQueryHandler(cb_bc_field, pattern=r"^bce[nl]:\d+$"),
+        CallbackQueryHandler(cb_bc_color_menu, pattern=r"^bcec:\d+$"),
+        CallbackQueryHandler(cb_bc_delete, pattern=r"^bcd:\d+$"),
+        CallbackQueryHandler(cb_bc_color, pattern=r"^bcc:[ne]:\d+:\w+$"),
         CallbackQueryHandler(cb_stats, pattern=r"^adm:stats$"),
         CallbackQueryHandler(cb_channels, pattern=r"^adm:channels$"),
     ])

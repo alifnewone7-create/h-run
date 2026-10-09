@@ -158,11 +158,13 @@ def test_broadcast_menus():
     texts = [b.text for row in rows for b in row]
     assert texts[:4] == ["🟢 Joined Users (3)", "⏳ Pending Users (2)", "🚪 Leaved Users (1)", "👥 All Users (6)"]
     assert [b.callback_data for row in rows for b in row][:4] == ["bc:joined", "bc:pending", "bc:leaved", "bc:all"]
-    skip = [b.callback_data for row in kb.bc_buttons_menu(False).inline_keyboard for b in row]
+    skip = [b.callback_data for row in kb.bc_buttons_menu([]).inline_keyboard for b in row]
     assert skip == ["bcb:add", "bcb:done", "adm:cancel"]
-    done = [b.text for row in kb.bc_buttons_menu(True).inline_keyboard for b in row]
-    assert "✅ Done" in done and "🗑 Remove Last" in done
-    assert [b.callback_data for b in kb.color_menu("bcc", "bcb:menu").inline_keyboard[0]] == ["bcc:none", "bcc:primary"]
+    done = [(b.text, b.callback_data) for row in kb.bc_buttons_menu(["A", "B"]).inline_keyboard for b in row]
+    assert done[:2] == [("1. A", "bce:0"), ("2. B", "bce:1")] and ("✅ Done", "bcb:done") in done
+    detail = kb.bc_button_menu(1, kb._btn(("S", "x"))).inline_keyboard
+    assert [b.callback_data for row in detail[1:] for b in row] == ["bcen:1", "bcel:1", "bcec:1", "bcd:1", "bcb:menu"]
+    assert [b.callback_data for b in kb.color_menu("bcc:n:0", "bcb:menu").inline_keyboard[0]] == ["bcc:n:0:none", "bcc:n:0:primary"]
 
 
 async def test_run_broadcast_with_buttons(monkeypatch):

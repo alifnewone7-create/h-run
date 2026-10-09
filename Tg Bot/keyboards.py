@@ -90,13 +90,21 @@ def broadcast_menu(counts: dict[str, int]) -> InlineKeyboardMarkup:
     ])
 
 
-def bc_buttons_menu(has_buttons: bool) -> InlineKeyboardMarkup:
-    rows = [[("➕ Add Button", "bcb:add", "success")]]
-    if has_buttons:
-        rows.append([("✅ Done", "bcb:done", "primary"), ("🗑 Remove Last", "bcb:undo", "danger")])
-    else:
-        rows.append([("⏭ Skip", "bcb:done", "primary")])
+def bc_buttons_menu(labels: list[str]) -> InlineKeyboardMarkup:
+    rows = [[(f"{i + 1}. {label}", f"bce:{i}", "primary")] for i, label in enumerate(labels)]
+    rows.append([("➕ Add Button", "bcb:add", "success")])
+    rows.append([("✅ Done" if labels else "⏭ Skip", "bcb:done", "primary")])
     return _build(rows + [[("❌ Cancel", "adm:cancel", "danger")]])
+
+
+def bc_button_menu(i: int, sample: InlineKeyboardButton) -> InlineKeyboardMarkup:
+    kb = _build([
+        [("✏️ Edit Name", f"bcen:{i}", "primary"), ("🔗 Edit Link", f"bcel:{i}", "primary")],
+        [("🎨 Edit Color", f"bcec:{i}", "success"), ("🗑 Delete", f"bcd:{i}", "danger")],
+        [("⬅️ Back", "bcb:menu", "danger")],
+    ])
+    kb.inline_keyboard.insert(0, [sample])
+    return kb
 
 
 def stats_menu() -> InlineKeyboardMarkup:
