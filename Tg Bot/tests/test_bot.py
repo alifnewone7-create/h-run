@@ -177,3 +177,24 @@ async def test_run_broadcast_with_buttons(monkeypatch):
     assert bot.copy_message.call_count == 2
     assert bot.copy_message.call_args.kwargs["reply_markup"] is markup
     assert "Joined Users" in bot.send_message.call_args.args[1]
+
+
+def test_layout_two_per_row():
+    import keyboards as kb
+    from utils import build_markup
+    btns = [{"text": t, "url": "https://t.me/x", "style": None} for t in "ABC"]
+    assert [len(r) for r in build_markup(btns).inline_keyboard] == [1, 1, 1]
+    assert [len(r) for r in build_markup(btns, per_row=2).inline_keyboard] == [2, 1]
+    rows = kb.bc_buttons_menu(["A", "B", "C"], 2).inline_keyboard
+    assert [len(r) for r in rows[:2]] == [2, 1] and rows[2][0].callback_data == "bcb:layout"
+    rows = kb.buttons_list("start", ["A", "B"], 2).inline_keyboard
+    assert len(rows[0]) == 2 and rows[1][0].callback_data == "btl:start"
+    assert kb.buttons_list("start", [], 2).inline_keyboard[0][0].callback_data == "bta:start"
+
+
+async def test_send_custom_uses_layout():
+    from utils import send_custom
+    bot = AsyncMock()
+    btns = [{"text": t, "alt": None, "icon": None, "url": "https://t.me/x", "style": None} for t in "AB"]
+    await send_custom(bot, 5, {"text": "Hi", "media": None, "buttons": btns, "layout": 2}, User(1, "B", False), "")
+    assert len(bot.send_message.call_args.kwargs["reply_markup"].inline_keyboard[0]) == 2

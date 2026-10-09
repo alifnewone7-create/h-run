@@ -135,10 +135,11 @@ def make_button(b: dict, icons: bool = True) -> InlineKeyboardButton:
     )
 
 
-def build_markup(buttons: list[dict], icons: bool = True) -> InlineKeyboardMarkup | None:
+def build_markup(buttons: list[dict], icons: bool = True, per_row: int = 1) -> InlineKeyboardMarkup | None:
     if not buttons:
         return None
-    return InlineKeyboardMarkup(inline_keyboard=[[make_button(b, icons)] for b in buttons])
+    btns = [make_button(b, icons) for b in buttons]
+    return InlineKeyboardMarkup(inline_keyboard=[btns[i:i + per_row] for i in range(0, len(btns), per_row)])
 
 
 def strip_icons(kb: InlineKeyboardMarkup | None) -> InlineKeyboardMarkup | None:
@@ -162,11 +163,12 @@ async def _deliver(bot: Bot, chat_id: int, media: dict | None, text: str, kb) ->
 
 async def send_custom(bot: Bot, chat_id: int, cfg: dict, user: User, channel: str) -> Message:
     text = render(cfg["text"], user, channel)
+    layout = cfg.get("layout", 1)
     try:
-        return await _deliver(bot, chat_id, cfg.get("media"), text, build_markup(cfg["buttons"]))
+        return await _deliver(bot, chat_id, cfg.get("media"), text, build_markup(cfg["buttons"], per_row=layout))
     except BadRequest as e:
         log.warning("Retrying without premium emoji (bot owner needs Telegram Premium): %s", e)
-        return await _deliver(bot, chat_id, cfg.get("media"), strip_tg_emoji(text), build_markup(cfg["buttons"], False))
+        return await _deliver(bot, chat_id, cfg.get("media"), strip_tg_emoji(text), build_markup(cfg["buttons"], False, layout))
 
 
 async def send_panel(bot: Bot, chat_id: int, text: str, kb: InlineKeyboardMarkup | None = None) -> Message:

@@ -2,6 +2,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 BACK = ("⬅️ Back", "adm:home", "danger")
+LAYOUTS = {1: "1 per line", 2: "2 per line"}
 STYLES = {"none": "⚪ Default", "primary": "🔵 Blue", "success": "🟢 Green", "danger": "🔴 Red"}
 
 
@@ -57,8 +58,18 @@ def media_menu(kind: str, has_media: bool) -> InlineKeyboardMarkup:
     return _build(rows + [[("⬅️ Back", f"cfg:{kind}", "danger")]])
 
 
-def buttons_list(kind: str, labels: list[str]) -> InlineKeyboardMarkup:
-    rows = [[(f"{i + 1}. {label}", f"bte:{kind}:{i}", "primary")] for i, label in enumerate(labels)]
+def _rows(items: list[tuple], per_row: int) -> list[list[tuple]]:
+    return [items[i:i + per_row] for i in range(0, len(items), per_row)]
+
+
+def _layout_btn(layout: int, data: str) -> tuple:
+    return (f"{'↔️' if layout == 2 else '↕️'} Layout: {LAYOUTS[layout]} (tap to change)", data, "primary")
+
+
+def buttons_list(kind: str, labels: list[str], layout: int = 1) -> InlineKeyboardMarkup:
+    rows = _rows([(f"{i + 1}. {label}", f"bte:{kind}:{i}", "primary") for i, label in enumerate(labels)], layout)
+    if labels:
+        rows.append([_layout_btn(layout, f"btl:{kind}")])
     return _build(rows + [[("➕ Add Button", f"bta:{kind}", "success")], [("⬅️ Back", f"cfg:{kind}", "danger")]])
 
 
@@ -90,8 +101,10 @@ def broadcast_menu(counts: dict[str, int]) -> InlineKeyboardMarkup:
     ])
 
 
-def bc_buttons_menu(labels: list[str]) -> InlineKeyboardMarkup:
-    rows = [[(f"{i + 1}. {label}", f"bce:{i}", "primary")] for i, label in enumerate(labels)]
+def bc_buttons_menu(labels: list[str], layout: int = 1) -> InlineKeyboardMarkup:
+    rows = _rows([(f"{i + 1}. {label}", f"bce:{i}", "primary") for i, label in enumerate(labels)], layout)
+    if labels:
+        rows.append([_layout_btn(layout, "bcb:layout")])
     rows.append([("➕ Add Button", "bcb:add", "success")])
     rows.append([("✅ Done" if labels else "⏭ Skip", "bcb:done", "primary")])
     return _build(rows + [[("❌ Cancel", "adm:cancel", "danger")]])

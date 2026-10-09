@@ -150,9 +150,10 @@ async def cb_bc_audience(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await cb.answer()
 
 
-def _bc_buttons_text(buttons: list[dict]) -> str:
+def _bc_buttons_text(buttons: list[dict], layout: int = 1) -> str:
     hint = (
-        "Tap a button to edit or delete it, add a new one, or tap ✅ Done."
+        f"📐 Layout: <b>{kb.LAYOUTS[layout]}</b>\n\n"
+        "Tap a button to edit or delete it, change the layout, add a new one, or tap ✅ Done."
         if buttons else "Add buttons under the broadcast message, or skip to send it without buttons."
     )
     return f"🔘 <b>Broadcast Buttons</b> ({len(buttons)}/{MAX_BUTTONS})\n\n{hint}"
@@ -172,7 +173,9 @@ def _bc_button_text(i: int, b: dict) -> str:
 async def _show_bc(target: Message, ctx: ContextTypes.DEFAULT_TYPE, i: int | None = None, edit: bool = True) -> None:
     buttons = ctx.user_data["buttons"]
     if i is None:
-        text, markup = _bc_buttons_text(buttons), kb.bc_buttons_menu([button_label(b) for b in buttons])
+        layout = ctx.user_data["layout"]
+        text = _bc_buttons_text(buttons, layout)
+        markup = kb.bc_buttons_menu([button_label(b) for b in buttons], layout)
     else:
         text, markup = _bc_button_text(i, buttons[i]), kb.bc_button_menu(i, make_button(buttons[i]))
     if edit:
@@ -185,7 +188,7 @@ async def on_bc_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
     set_state(
         ctx, "bc_buttons",
-        from_chat=message.chat_id, msg_id=message.message_id, emoji=count_entities(message), buttons=[],
+        from_chat=message.chat_id, msg_id=message.message_id, emoji=count_entities(message), buttons=[], layout=1,
     )
     await message.reply_text(_bc_buttons_text([]), reply_markup=to_ptb(kb.bc_buttons_menu([])), do_quote=True)
 
@@ -213,6 +216,14 @@ async def cb_bc_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data["state"] = "bc_buttons"
     await _show_bc(update.callback_query.message, ctx)
     await update.callback_query.answer()
+
+
+@bc_session
+async def cb_bc_layout(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    ctx.user_data["layout"] = 1 if ctx.user_data["layout"] == 2 else 2
+    ctx.user_data["state"] = "bc_buttons"
+    await _show_bc(update.callback_query.message, ctx)
+    await update.callback_query.answer(f"📐 Layout: {kb.LAYOUTS[ctx.user_data['layout']]}")
 
 
 @bc_session
@@ -334,17 +345,17 @@ async def cb_bc_done(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if data["buttons"]:
         # preview with buttons; premium icons need the bot owner's Telegram Premium
         try:
-            markup = to_ptb(build_markup(data["buttons"]))
+            markup = to_ptb(build_markup(data["buttons"], per_row=data["layout"]))
             await ctx.bot.copy_message(cb.message.chat.id, data["from_chat"], data["msg_id"], reply_markup=markup)
         except BadRequest:
-            markup = to_ptb(build_markup(data["buttons"], icons=False))
+            markup = to_ptb(build_markup(data["buttons"], icons=False, per_row=data["layout"]))
             await ctx.bot.copy_message(cb.message.chat.id, data["from_chat"], data["msg_id"], reply_markup=markup)
     set_state(ctx, "bc_confirm", markup=markup)
     total = await db.count_users(data["audience"])
     text = (
         f"{'👆 Preview above. ' if markup else ''}This message will be sent to <b>{total}</b> "
         f"{kb.AUDIENCES[data['audience']]}.\n"
-        f"🔘 Buttons: <b>{len(data['buttons'])}</b>\n"
+        f"🔘 Buttons: <b>{len(data['buttons'])}</b>  📐 Layout: <b>{kb.LAYOUTS[data['layout']]}</b>\n"
         f"✨ Premium emoji: <b>{data['emoji']}</b>\n\nConfirm?"
     )
     if markup:
@@ -405,6 +416,7 @@ def register_callbacks(app: Application) -> None:
         CallbackQueryHandler(cb_bc_go, pattern=r"^bc:go$"),
         CallbackQueryHandler(cb_bc_menu, pattern=r"^bcb:menu$"),
         CallbackQueryHandler(cb_bc_add, pattern=r"^bcb:add$"),
+        CallbackQueryHandler(cb_bc_layout, pattern=r"^bcb:layout$"),
         CallbackQueryHandler(cb_bc_done, pattern=r"^bcb:done$"),
         CallbackQueryHandler(cb_bc_edit, pattern=r"^bce:\d+$"),
         CallbackQueryHandler(cb_bc_field, pattern=r"^bce[nl]:\d+$"),

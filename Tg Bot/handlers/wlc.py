@@ -42,7 +42,7 @@ def summary(kind: str, cfg: dict) -> str:
         f"⚙️ <b>{KINDS[kind]}</b>\n<i>{DESC[kind]}</i>\n\n"
         f"📝 Text: <b>{'Set' if cfg['text'] else 'Empty'}</b>\n"
         f"🖼 Media: <b>{media}</b>\n"
-        f"🔘 Buttons: <b>{len(cfg['buttons'])}</b>\n"
+        f"🔘 Buttons: <b>{len(cfg['buttons'])}</b>  📐 Layout: <b>{kb.LAYOUTS[cfg.get('layout', 1)]}</b>\n"
         f"✨ Premium emoji: <b>{count_tg_emoji(cfg['text'])}</b>"
     )
 
@@ -71,11 +71,13 @@ async def show_kind(target: Message, kind: str, edit: bool = True) -> None:
 
 async def show_buttons(target: Message, kind: str, edit: bool = True) -> None:
     cfg = await db.get_msg(kind)
+    layout = cfg.get("layout", 1)
     text = (
         f"🔘 <b>{KINDS[kind]} – Buttons</b> ({len(cfg['buttons'])}/{MAX_BUTTONS})\n\n"
-        "Tap a button to edit or delete it, or add a new one."
+        f"📐 Layout: <b>{kb.LAYOUTS[layout]}</b>\n\n"
+        "Tap a button to edit or delete it, change the layout, or add a new one."
     )
-    await _show(target, text, kb.buttons_list(kind, [button_label(b) for b in cfg["buttons"]]), edit)
+    await _show(target, text, kb.buttons_list(kind, [button_label(b) for b in cfg["buttons"]], layout), edit)
 
 
 async def show_button(target: Message, kind: str, i: int, edit: bool = True) -> None:
@@ -297,6 +299,17 @@ async def cb_button_delete(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await cb.answer("🗑 Button deleted")
 
 
+@admin_only
+async def cb_button_layout(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
+    kind = _args(cb)[0]
+    cfg = await db.get_msg(kind)
+    cfg["layout"] = 1 if cfg.get("layout", 1) == 2 else 2
+    await db.set_msg(kind, cfg)
+    await show_buttons(cb.message, kind)
+    await cb.answer(f"📐 Layout: {kb.LAYOUTS[cfg['layout']]}")
+
+
 async def on_button_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
     if not message.text:
@@ -365,4 +378,5 @@ def register_callbacks(app: Application) -> None:
         CallbackQueryHandler(cb_button_color, pattern=r"^btec:"),
         CallbackQueryHandler(cb_button_set_color, pattern=r"^btc:"),
         CallbackQueryHandler(cb_button_delete, pattern=r"^btd:"),
+        CallbackQueryHandler(cb_button_layout, pattern=r"^btl:(start|welcome)$"),
     ])
