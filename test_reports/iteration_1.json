@@ -1,0 +1,41 @@
+{
+  "summary": "Backend-only testing of aiogram 3 Telegram bot at '/app/Tg Bot'. Created pytest suite with 29 tests covering compile checks, handler imports, database layer against real Neon Postgres, utils.render, and all key handlers (join auto/non, admin callbacks, text edit saving html_text, broadcast flow, stats, channels, /start). Handlers were driven via Dispatcher.feed_update with a custom MockedSession (no real Telegram network calls). All 29 tests passed. Original approve_mode and welcome_text settings were saved before the run and restored on teardown; all TEST_ rows (user_id >= 999000000, chat_id -1009990001001) were cleaned.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "handlers/join.py on_private_status", "issue": "Uses ev.from_user.id instead of ev.chat.id to identify the private user; works when the user themselves triggers the update but is semantically off — the subject of a my_chat_member update in a private chat is the chat (user), not from_user. Not blocking."},
+      {"endpoint": "utils.run_broadcast", "issue": "Fixed 0.05s sleep per user gives ~20 msg/s which is fine, but there is no global flood protection beyond RetryAfter handling. Not a functional bug."},
+      {"endpoint": "handlers/admin.py cb_bc_go", "issue": "Uses asyncio.create_task without storing the reference — if Dispatcher shuts down, broadcast may be cancelled. Acceptable for current design."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/Tg Bot/tests/test_bot.py",
+    "/app/Tg Bot/tests/conftest.py",
+    "/app/Tg Bot/pytest.ini",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "database.pool is a module-global; good for a single-process bot but not reusable in multi-process. OK for this scope.",
+    "upsert_user block-reset-only-on-started semantics is correctly implemented and verified by test_upsert_user_started_and_block_logic.",
+    "join.py sends welcome message BEFORE req.approve() (verified by request-order assertion) — correct, since user_chat_id becomes invalid after approval.",
+    "admin router applies F.from_user.id.in_(ADMIN_IDS) at router level — verified non-admin receives no response for /admin.",
+    "text:edit stores message.html_text (preserves formatting entities) — verified end-to-end through FSM state.",
+    "run_broadcast marks TelegramForbiddenError recipients as blocked via db.set_blocked — verified.",
+    "No hardcoded secrets in handlers; all config from env via config.py.",
+    "Minor: ADMIN_IDS parsing in config.py is strict (requires env var) — crashes early if missing, which is desirable."
+  ],
+  "updated_files": [
+    "/app/Tg Bot/tests/test_bot.py (new)",
+    "/app/Tg Bot/tests/conftest.py (new)",
+    "/app/Tg Bot/pytest.ini (new)"
+  ],
+  "success_rate": {"backend": "100% (29/29)", "frontend": "N/A"},
+  "test_credentials": "N/A — bot uses token from .env; tests use a dummy token '123456:TESTTOKEN' with a MockedSession so no real API calls are made.",
+  "seed_data_creation": "Transient only. Test users 999000001-3, 999000777, and chat -1009990001001 are inserted and then deleted in autouse per-test cleanup + session teardown. Also deletes TEST_setting_key_999 from settings. approve_mode and welcome_text are snapshotted at session start and restored at session end.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run with: cd '/app/Tg Bot' && python -m pytest tests/test_bot.py -v. Takes ~2 minutes because every test hits the real Neon Postgres over the internet. pytest.ini sets session-wide asyncio loop scope because the asyncpg pool is session-scoped. Dispatcher fixture is session-scoped because aiogram routers can only be attached to one Dispatcher. The MockedSession must call .as_(bot) on returned Message objects so msg.edit_text works inside handlers.",
+  "rca_of_the_issue": "N/A — no bugs found. Two initial test-infrastructure issues were fixed in-test: (1) asyncpg pool was tied to the first event loop; resolved by setting asyncio_default_test_loop_scope = session and keeping dp session-scoped. (2) Mocked Message responses were not bound to the Bot instance, causing msg.edit_text to raise; resolved by calling returned_message.as_(bot) inside MockedSession.make_request."
+}

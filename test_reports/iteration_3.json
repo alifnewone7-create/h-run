@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 3 backend-only testing for the new 'Wlc Setting' feature (replaces old 'Text Set') in /app/Tg Bot. Rewrote the pytest suite: removed obsolete 'text:edit' / 'text:reset' / send_html / TextSet tests and added full coverage of handlers/wlc.py and database get_msg/set_msg/reset_msg. 81/81 tests pass against the real Neon DB using a mocked aiogram session. Verified: (1) Admin main menu now has '👋 Wlc Setting' (adm:wlc) and no 'Text Set' leftover; adm:wlc renders cfg:start and cfg:welcome. (2) cfg:{kind} summary shows Text / Media / Buttons / Premium emoji counts with action buttons txt/med/btn/prv/rst. (3) txt:{kind} saves message.html_text (custom_emoji entity -> <tg-emoji emoji-id=...>) into settings key msg:{kind} as JSON; non-text in txt-state is rejected. (4) med:{kind} saves {type,file_id}; caption becomes new text; medr:{kind} nulls media; non-media rejected. (5) bta flow: parse_button_name extracts first custom_emoji as icon_custom_emoji_id (alt kept); normalize_url turns t.me/x into https://t.me/x, invalid rejected, color menu writes style ('none' -> null). (6) bte/bten/btel/btec/btd edit flows round-trip; out-of-range bte and btc indexes raise show_alert via AnswerCallbackQuery. (7) prv:{kind} delivers via send_custom: text-only uses sendMessage with buttons (style preserved); media uses send_photo etc with caption. send_custom caption > 1024 chars sends media without caption + separate text message; TelegramBadRequest triggers one retry with tg-emoji stripped and icons removed. (8) rst:{kind} resets to DEFAULT_MSGS; welcome reset also deletes legacy welcome_text; get_msg('welcome') migrates from legacy welcome_text when msg:welcome missing. (9) /start sends Start Msg via send_custom and admin receives extra '/admin' hint; join_request sends Wlc Msg before approve in auto mode and marks join_requests.status='approved' (pending in non mode). (10) English-only audit over handlers/* + utils + keyboards + database (now includes wlc.py) finds zero Banglish words. Session teardown snapshots ALL settings rows and restores them verbatim; only test users (ids 999000001-3, 999000777/888) and TEST_CHAT_ID -1009990001001 are deleted; any msg:start/msg:welcome keys created by tests are removed on teardown.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "handlers/wlc.py cb_button_set_color (btc)", "issue": "No check whether the state 'none' passed to STYLES[style] is a valid key other than STYLES dict lookup; crafted callback 'btc:start:0:bogus' would raise KeyError and surface as a 'bot error'. Low priority (callback_data is bot-generated), but a .get fallback would be safer."},
+      {"endpoint": "handlers/admin.py cb_bc_go", "issue": "asyncio.create_task reference not stored - carried over from prior iterations; not a functional bug."},
+      {"endpoint": "handlers/wlc.py normalize_url", "issue": "Regex ^(https?|tg)://\\S+$ accepts tg://... which Telegram may not render as an inline-button URL in all clients. Current spec allows it; flagged for awareness."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/Tg Bot/tests/test_bot.py",
+    "/app/Tg Bot/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "handlers/wlc.py is well-scoped (~350 lines) and reuses shared helpers from utils (send_custom, parse_button_name, extract_media, safe_edit) - no duplication.",
+    "db.get_msg correctly migrates legacy welcome_text when msg:welcome is absent; db.reset_msg('welcome') also deletes legacy key - verified end-to-end.",
+    "utils.send_custom's retry on TelegramBadRequest strips tg-emoji and icons, which handles bot-owner-not-Premium case; also handles caption>1024 by sending media then separate text.",
+    "parse_button_name uses UTF-16 offsets correctly for custom_emoji entity extraction - verified with 🔥 surrogate pair.",
+    "keyboards._btn supports the new `style` attr (aiogram 3.31 InlineKeyboardButton.style); color_menu writes btc:{kind}:{i}:{key} and 'none' maps to style=None in handler.",
+    "FSMContext data (name/icon/alt/kind/idx) correctly carried through btn_name -> btn_url for both add and edit paths.",
+    "Suggestion: in cb_button_set_color, use STYLES.get(style, STYLES['none']) for the toast and reject unknown styles to avoid KeyError on malformed callback_data."
+  ],
+  "updated_files": [
+    "/app/Tg Bot/tests/test_bot.py (full rewrite - 81 tests; added TestMsgStorage, TestUtils expansion with parse_button_name/extract_media/build_markup, TestSendCustom (5 cases), TestWlcMenu, TestWlcText, TestWlcMedia, TestWlcButtons (7 cases), TestWlcPreview, TestWlcReset, TestWlcUrlNormalization; MockedSession now records SendPhoto/Video/Audio/Animation/Document/Voice/AnswerCallbackQuery and raises CUSTOM_EMOJI_INVALID on media captions too; session teardown now snapshots ALL settings and restores verbatim)"
+  ],
+  "success_rate": {"backend": "100% (81/81)", "frontend": "N/A"},
+  "test_credentials": "N/A - dummy token '123456:TESTTOKEN' with MockedSession; real Neon DATABASE_URL from /app/Tg Bot/.env for DB layer.",
+  "seed_data_creation": "Transient only. TEST_USER_IDS 999000001-3, 999000777/888, chat -1009990001001, settings keys msg:start/msg:welcome/TEST_setting_key_999 are inserted and cleaned up per-test and at session teardown. ALL settings rows are snapshotted at session start and restored verbatim at session end (any key the suite created but didn't exist in snapshot is deleted; any pre-existing key the suite overwrote is restored). approve_mode and legacy welcome_text are therefore preserved exactly.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run: cd '/app/Tg Bot' && python -m pytest tests/test_bot.py -v  (~6 minutes against real Neon). MockedSession.calls_of now accepts multiple classes (varargs). For media caption BadRequest simulation, set session.bad_request_on_tg_emoji=True - it applies to both SendMessage.text and media caption. To construct a Message with custom_emoji entity, compute offset/length as UTF-16 code units: offset = len(prefix.encode('utf-16-le'))//2, length = len(emoji.encode('utf-16-le'))//2. aiogram 3.31 InlineKeyboardButton.style accepts 'primary'/'success'/'danger' or None, and icon_custom_emoji_id accepts a string.",
+  "rca_of_the_issue": "N/A - all new Wlc Setting flows implemented correctly and verified. The old Text Set tests from iteration 2 that were obsoleted (text:edit, text:reset, send_html, adm:text) have been replaced by the new wlc flows. No code changes made to the bot source; only the test suite was rewritten."
+}

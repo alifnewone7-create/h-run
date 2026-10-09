@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 2 backend-only testing of aiogram 3 bot at '/app/Tg Bot'. Verified new requirements: (1) English-only language audit across utils.py, keyboards.py, handlers/{admin,join,user}.py, database.py - no Banglish markers (korun/pathan/hobe/nai/dekhun/chalu/bondho/likhun/shob/apnar/amader/boshai/rakhun/shuru/shesh/koro/pathate...). (2) Telegram Premium / custom emoji support in Text Set and Broadcast: aiogram's Message.html_text renders custom_emoji entities as <tg-emoji emoji-id=\"...\">EMOJI</tg-emoji>; on_new_text persists html_text verbatim; text preview and broadcast confirm show 'Premium emoji: <b>N</b>'. (3) utils.send_html HTML parse_mode is default via DefaultBotProperties; on TelegramBadRequest it retries once with strip_tg_emoji fallback and re-raises if there were no tg-emoji tags. (4) Join handler delivers welcome via send_html, so the fallback path is exercised end-to-end. Added 11 new tests to the existing suite; total 40/40 pass. Suite still restores original approve_mode/welcome_text and cleans TEST_ rows.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "handlers/join.py on_private_status", "issue": "Still uses ev.chat.id (fixed as per prev iteration) — correct now; carried over note only."},
+      {"endpoint": "utils.send_html", "issue": "Fallback only differentiates TelegramBadRequest; a BadRequest unrelated to custom emoji on a text that happens to contain <tg-emoji> would be silently rewritten. Acceptable given log.warning emitted, but could be tightened by matching 'CUSTOM_EMOJI' in the error message."},
+      {"endpoint": "handlers/admin.py cb_bc_go", "issue": "asyncio.create_task reference not stored (noted previously). Not functional bug."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/Tg Bot/tests/test_bot.py",
+    "/app/Tg Bot/tests/conftest.py",
+    "/app/Tg Bot/pytest.ini",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "utils.send_html correctly checks `plain == text` before retrying and re-raises if no fallback is possible — good.",
+    "count_entities aggregates msg.entities + msg.caption_entities so Premium emoji counting works for captioned media messages in Broadcast as well.",
+    "handlers/admin.on_new_text saves message.html_text so <tg-emoji> tags are stored verbatim; render() does not touch them, so they survive to send_html.",
+    "handlers/admin.on_bc_message currently only looks at message.entities / caption_entities via count_entities; copy_message in cb_bc_go preserves all entities on Telegram's side, so this is correct.",
+    "DefaultBotProperties(parse_mode=HTML) is set in bot.py (verified via test runs) — send_message calls do not need explicit parse_mode.",
+    "English-only audit: searched handlers/*.py, utils.py, keyboards.py, database.py against a Banglish word list — zero hits.",
+    "Suggestion (optional): tighten send_html to only strip tg-emoji when the error message contains 'CUSTOM_EMOJI' to avoid masking unrelated BadRequests."
+  ],
+  "updated_files": [
+    "/app/Tg Bot/tests/test_bot.py (added MockedSession.bad_request_on_tg_emoji flag + 11 new tests across 5 new classes: TestCustomEmojiUtils, TestSendHtmlFallback, TestTextSetWithCustomEmoji, TestJoinSendHtmlFallback, TestBroadcastWithCustomEmoji, TestEnglishOnlyLanguage)"
+  ],
+  "success_rate": {"backend": "100% (40/40)", "frontend": "N/A"},
+  "test_credentials": "N/A — dummy token '123456:TESTTOKEN' with MockedSession; real Neon DATABASE_URL from /app/Tg Bot/.env for DB layer.",
+  "seed_data_creation": "Transient only. TEST_USER_IDS 999000001-3, 999000777/888, chat -1009990001001, and settings key TEST_setting_key_999 are inserted and cleaned up per-test and at session teardown. approve_mode and welcome_text are snapshotted at session start and restored at session end.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run: cd '/app/Tg Bot' && python -m pytest tests/test_bot.py -v  (~2m40s against real Neon). New fixture flag session.bad_request_on_tg_emoji simulates Telegram rejecting custom emoji (needed because the bot owner must have Telegram Premium for custom emoji in private chats). To add more entity-based tests, use MessageEntity(type='custom_emoji', offset=UTF16_offset, length=UTF16_len, custom_emoji_id='...') and verify Message.html_text contains the expected <tg-emoji> tag.",
+  "rca_of_the_issue": "N/A — new features implemented correctly. All 11 new assertions pass on first run."
+}
