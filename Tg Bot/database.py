@@ -49,6 +49,19 @@ CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS members (
+    user_id    BIGINT NOT NULL,
+    chat_id    BIGINT NOT NULL,
+    status     TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, chat_id)
+);
+ALTER TABLE join_requests ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE channels ADD COLUMN IF NOT EXISTS member_count INTEGER NOT NULL DEFAULT 0;
+DELETE FROM join_requests a USING join_requests b
+    WHERE a.user_id = b.user_id AND a.chat_id = b.chat_id
+    AND (b.status = 'approved', b.id) > (a.status = 'approved', a.id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_requests_user_chat ON join_requests (user_id, chat_id);
 CREATE INDEX IF NOT EXISTS idx_users_joined ON users (joined_at);
 CREATE INDEX IF NOT EXISTS idx_users_active ON users (last_active);
 CREATE INDEX IF NOT EXISTS idx_requests_created ON join_requests (created_at);
@@ -118,8 +131,32 @@ async def get_user_ids(period: str) -> list[int]:
 
 # ---------- join requests ----------
 async def add_request(user_id: int, chat_id: int, status: str) -> None:
+    # one row per user + channel: a new request resets it, approval updates it
     await pool.execute(
-        "INSERT INTO join_requests (user_id, chat_id, status) VALUES ($1, $2, $3)",
+        """
+        INSERT INTO join_requests (user_id, chat_id, status) VALUES ($1, $2, $3)
+        ON CONFLICT (user_id, chat_id) DO UPDATE SET
+            status = EXCLUDED.status, created_at = now(), updated_at = now()
+        """,
+        user_id, chat_id, status,
+    )
+
+
+async def approve_request(user_id: int, chat_id: int) -> None:
+    await pool.execute(
+        "UPDATE join_requests SET status = 'approved', updated_at = now() "
+        "WHERE user_id = $1 AND chat_id = $2 AND status = 'pending'",
+        user_id, chat_id,
+    )
+
+
+# ---------- members (joined / left) ----------
+async def set_member(user_id: int, chat_id: int, status: str) -> None:
+    await pool.execute(
+        """
+        INSERT INTO members (user_id, chat_id, status) VALUES ($1, $2, $3)
+        ON CONFLICT (user_id, chat_id) DO UPDATE SET status = EXCLUDED.status, updated_at = now()
+        """,
         user_id, chat_id, status,
     )
 
@@ -134,6 +171,10 @@ async def upsert_channel(chat_id: int, title: str | None, is_admin: bool) -> Non
         """,
         chat_id, title, is_admin,
     )
+
+
+async def set_member_count(chat_id: int, count: int) -> None:
+    await pool.execute("UPDATE channels SET member_count = $2 WHERE chat_id = $1", chat_id, count)
 
 
 async def list_channels() -> list[asyncpg.Record]:
@@ -194,5 +235,12 @@ async def get_stats() -> dict:
         "COUNT(*) FILTER (WHERE status = 'approved') AS approved, "
         "COUNT(*) FILTER (WHERE status = 'pending') AS pending FROM join_requests"
     )
-    channels = await pool.fetchval("SELECT COUNT(*) FROM channels WHERE is_admin")
-    return {**dict(users), **dict(reqs), "channels": channels}
+    members = await pool.fetchrow(
+        "SELECT COUNT(*) FILTER (WHERE status = 'joined') AS joined, "
+        "COUNT(*) FILTER (WHERE status = 'left') AS leaved FROM members"
+    )
+    channels = await pool.fetchrow(
+        "SELECT COUNT(*) AS channels, COALESCE(SUM(member_count), 0) AS channel_members "
+        "FROM channels WHERE is_admin"
+    )
+    return {**dict(users), **dict(reqs), **dict(members), **dict(channels)}

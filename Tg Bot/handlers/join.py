@@ -12,6 +12,7 @@ from utils import send_custom
 log = logging.getLogger(__name__)
 
 ADMIN_STATUSES = {"administrator", "creator"}
+MEMBER_STATUSES = {"member", "administrator", "creator"}
 
 
 async def on_join_request(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -37,6 +38,21 @@ async def on_join_request(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await db.add_request(user.id, req.chat.id, status)
 
 
+def is_member(m) -> bool:
+    return m.status in MEMBER_STATUSES or (m.status == "restricted" and m.is_member)
+
+
+async def on_member(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    ev = update.chat_member
+    user = ev.new_chat_member.user
+    was, now = is_member(ev.old_chat_member), is_member(ev.new_chat_member)
+    if user.is_bot or was == now:
+        return
+    await db.set_member(user.id, ev.chat.id, "joined" if now else "left")
+    if now:
+        await db.approve_request(user.id, ev.chat.id)
+
+
 async def on_my_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ev = update.my_chat_member
     if ev.chat.type == "private":
@@ -55,3 +71,4 @@ async def on_my_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 def register(app: Application) -> None:
     app.add_handler(ChatJoinRequestHandler(on_join_request))
     app.add_handler(ChatMemberHandler(on_my_status, ChatMemberHandler.MY_CHAT_MEMBER))
+    app.add_handler(ChatMemberHandler(on_member, ChatMemberHandler.CHAT_MEMBER))

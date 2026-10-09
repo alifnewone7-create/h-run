@@ -132,3 +132,21 @@ async def test_send_custom_photo_and_fallback():
 def test_normalize_url(raw, expected):
     from handlers.wlc import normalize_url
     assert normalize_url(raw) == expected
+
+
+async def test_member_join_and_leave(monkeypatch):
+    from telegram import ChatMemberLeft, ChatMemberMember, ChatMemberUpdated, Update
+
+    import handlers.join as j
+    calls = []
+    monkeypatch.setattr(j.db, "set_member", AsyncMock(side_effect=lambda *a: calls.append(("member", *a))))
+    monkeypatch.setattr(j.db, "approve_request", AsyncMock(side_effect=lambda *a: calls.append(("approve", *a))))
+    user, chat = User(5, "Bob", False), Chat(-100, "channel")
+    left, member = ChatMemberLeft(user), ChatMemberMember(user)
+
+    def upd(old, new):
+        return Update(1, chat_member=ChatMemberUpdated(chat, user, datetime.now(timezone.utc), old, new))
+
+    await j.on_member(upd(left, member), None)
+    await j.on_member(upd(member, left), None)
+    assert calls == [("member", 5, -100, "joined"), ("approve", 5, -100), ("member", 5, -100, "left")]

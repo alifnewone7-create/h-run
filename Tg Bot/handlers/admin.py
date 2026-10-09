@@ -1,7 +1,8 @@
 import html
 from datetime import datetime, timezone
 
-from telegram import Update
+from telegram import Bot, Update
+from telegram.error import TelegramError
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 import database as db
@@ -42,7 +43,16 @@ def _period_block(title: str, s: dict, prefix: str) -> str:
     )
 
 
-async def stats_text() -> str:
+async def refresh_member_counts(bot: Bot) -> None:
+    for r in await db.list_channels():
+        try:
+            await db.set_member_count(r["chat_id"], await bot.get_chat_member_count(r["chat_id"]))
+        except TelegramError:
+            pass
+
+
+async def stats_text(bot: Bot) -> str:
+    await refresh_member_counts(bot)
     s = await db.get_stats()
     mode = await db.get_setting("approve_mode", "non")
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -52,6 +62,8 @@ async def stats_text() -> str:
         + _period_block("🔥 <b>Active Users</b>", s, "act") + "\n"
         + _period_block("📥 <b>Join Requests</b>", s, "req") + "\n"
         f"✅ Approved: <b>{s['approved']}</b>  ⏳ Pending: <b>{s['pending']}</b>\n"
+        f"🟢 Joined: <b>{s['joined']}</b>  🚪 Leaved: <b>{s['leaved']}</b>\n"
+        f"👥 Channel Members: <b>{s['channel_members']}</b>\n"
         f"🤖 Bot started: <b>{s['started']}</b>  🚫 Blocked: <b>{s['blocked']}</b>\n"
         f"📡 Channels: <b>{s['channels']}</b>  ⚙️ Mode: <b>{MODE_NAMES[mode]}</b>\n\n"
         f"🕒 Updated: <code>{now}</code>"
@@ -151,7 +163,7 @@ async def cb_bc_go(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ---------- statistics ----------
 @admin_only
 async def cb_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await safe_edit(update.callback_query.message, await stats_text(), kb.stats_menu())
+    await safe_edit(update.callback_query.message, await stats_text(ctx.bot), kb.stats_menu())
     await update.callback_query.answer("🔄 Updated")
 
 
