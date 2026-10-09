@@ -73,10 +73,17 @@ def buttons_list(kind: str, labels: list[str], layout: int = 1) -> InlineKeyboar
     return _build(rows + [[("➕ Add Button", f"bta:{kind}", "success")], [("⬅️ Back", f"cfg:{kind}", "danger")]])
 
 
-def button_menu(kind: str, i: int, sample: InlineKeyboardButton) -> InlineKeyboardMarkup:
+def _move_row(i: int, total: int, prefix: str, ref: str) -> list[list[tuple]]:
+    row = [("⬆️ Move Up", f"{prefix}u:{ref}", "primary")] if i > 0 else []
+    row += [("⬇️ Move Down", f"{prefix}d:{ref}", "primary")] if i < total - 1 else []
+    return [row] if row else []
+
+
+def button_menu(kind: str, i: int, sample: InlineKeyboardButton, total: int = 1) -> InlineKeyboardMarkup:
     kb = _build([
         [("✏️ Edit Name", f"bten:{kind}:{i}", "primary"), ("🔗 Edit Link", f"btel:{kind}:{i}", "primary")],
         [("🎨 Edit Color", f"btec:{kind}:{i}", "success"), ("🗑 Delete", f"btd:{kind}:{i}", "danger")],
+        *_move_row(i, total, "btm", f"{kind}:{i}"),
         [("⬅️ Back", f"btn:{kind}", "danger")],
     ])
     kb.inline_keyboard.insert(0, [sample])
@@ -110,10 +117,11 @@ def bc_buttons_menu(labels: list[str], layout: int = 1) -> InlineKeyboardMarkup:
     return _build(rows + [[("❌ Cancel", "adm:cancel", "danger")]])
 
 
-def bc_button_menu(i: int, sample: InlineKeyboardButton) -> InlineKeyboardMarkup:
+def bc_button_menu(i: int, sample: InlineKeyboardButton, total: int = 1) -> InlineKeyboardMarkup:
     kb = _build([
         [("✏️ Edit Name", f"bcen:{i}", "primary"), ("🔗 Edit Link", f"bcel:{i}", "primary")],
         [("🎨 Edit Color", f"bcec:{i}", "success"), ("🗑 Delete", f"bcd:{i}", "danger")],
+        *_move_row(i, total, "bcm", str(i)),
         [("⬅️ Back", "bcb:menu", "danger")],
     ])
     kb.inline_keyboard.insert(0, [sample])

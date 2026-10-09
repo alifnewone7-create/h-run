@@ -122,6 +122,14 @@ def parse_button_name(msg: Message) -> tuple[str, str | None, str | None]:
     return rest or alt, ce.custom_emoji_id, alt
 
 
+def move_item(items: list, i: int, step: int) -> int | None:
+    j = i + step
+    if not 0 <= i < len(items) or not 0 <= j < len(items):
+        return None
+    items[i], items[j] = items[j], items[i]
+    return j
+
+
 def button_label(b: dict) -> str:
     return f"{b['alt']} {b['text']}" if b.get("alt") and b["alt"] != b["text"] else b["text"]
 

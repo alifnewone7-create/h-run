@@ -13,6 +13,7 @@ from utils import (
     extract_media,
     html_text,
     make_button,
+    move_item,
     normalize_url,
     parse_button_name,
     render,
@@ -81,8 +82,9 @@ async def show_buttons(target: Message, kind: str, edit: bool = True) -> None:
 
 
 async def show_button(target: Message, kind: str, i: int, edit: bool = True) -> None:
-    b = (await db.get_msg(kind))["buttons"][i]
-    await _show(target, button_info(kind, i, b), kb.button_menu(kind, i, make_button(b)), edit)
+    buttons = (await db.get_msg(kind))["buttons"]
+    b = buttons[i]
+    await _show(target, button_info(kind, i, b), kb.button_menu(kind, i, make_button(b), len(buttons)), edit)
 
 
 async def _button_or_alert(cb: CallbackQuery, kind: str, i: int) -> dict | None:
@@ -310,6 +312,20 @@ async def cb_button_layout(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await cb.answer(f"📐 Layout: {kb.LAYOUTS[cfg['layout']]}")
 
 
+@admin_only
+async def cb_button_move(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
+    kind, i = _args(cb)
+    cfg = await db.get_msg(kind)
+    j = move_item(cfg["buttons"], int(i), -1 if cb.data.startswith("btmu:") else 1)
+    if j is None:
+        await cb.answer("Can't move this button", show_alert=True)
+        return
+    await db.set_msg(kind, cfg)
+    await show_button(cb.message, kind, j)
+    await cb.answer(f"✅ Moved to #{j + 1}")
+
+
 async def on_button_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
     if not message.text:
@@ -378,5 +394,6 @@ def register_callbacks(app: Application) -> None:
         CallbackQueryHandler(cb_button_color, pattern=r"^btec:"),
         CallbackQueryHandler(cb_button_set_color, pattern=r"^btc:"),
         CallbackQueryHandler(cb_button_delete, pattern=r"^btd:"),
+        CallbackQueryHandler(cb_button_move, pattern=r"^btm[ud]:(start|welcome):\d+$"),
         CallbackQueryHandler(cb_button_layout, pattern=r"^btl:(start|welcome)$"),
     ])

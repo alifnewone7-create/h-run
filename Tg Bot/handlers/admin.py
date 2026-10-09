@@ -15,6 +15,7 @@ from utils import (
     button_label,
     count_entities,
     make_button,
+    move_item,
     normalize_url,
     parse_button_name,
     run_broadcast,
@@ -177,7 +178,7 @@ async def _show_bc(target: Message, ctx: ContextTypes.DEFAULT_TYPE, i: int | Non
         text = _bc_buttons_text(buttons, layout)
         markup = kb.bc_buttons_menu([button_label(b) for b in buttons], layout)
     else:
-        text, markup = _bc_button_text(i, buttons[i]), kb.bc_button_menu(i, make_button(buttons[i]))
+        text, markup = _bc_button_text(i, buttons[i]), kb.bc_button_menu(i, make_button(buttons[i]), len(buttons))
     if edit:
         await safe_edit(target, text, markup)
     else:
@@ -286,6 +287,19 @@ async def cb_bc_delete(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.user_data["state"] = "bc_buttons"
         await _show_bc(cb.message, ctx)
         await cb.answer("🗑 Button deleted")
+
+
+@bc_session
+async def cb_bc_move(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
+    action, i = cb.data.split(":")
+    j = move_item(ctx.user_data["buttons"], int(i), -1 if action == "bcmu" else 1)
+    if j is None:
+        await cb.answer("Can't move this button", show_alert=True)
+        return
+    ctx.user_data["state"] = "bc_buttons"
+    await _show_bc(cb.message, ctx, j)
+    await cb.answer(f"✅ Moved to #{j + 1}")
 
 
 async def on_bc_btn_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -422,6 +436,7 @@ def register_callbacks(app: Application) -> None:
         CallbackQueryHandler(cb_bc_field, pattern=r"^bce[nl]:\d+$"),
         CallbackQueryHandler(cb_bc_color_menu, pattern=r"^bcec:\d+$"),
         CallbackQueryHandler(cb_bc_delete, pattern=r"^bcd:\d+$"),
+        CallbackQueryHandler(cb_bc_move, pattern=r"^bcm[ud]:\d+$"),
         CallbackQueryHandler(cb_bc_color, pattern=r"^bcc:[ne]:\d+:\w+$"),
         CallbackQueryHandler(cb_stats, pattern=r"^adm:stats$"),
         CallbackQueryHandler(cb_channels, pattern=r"^adm:channels$"),

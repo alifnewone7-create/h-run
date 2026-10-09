@@ -162,8 +162,8 @@ def test_broadcast_menus():
     assert skip == ["bcb:add", "bcb:done", "adm:cancel"]
     done = [(b.text, b.callback_data) for row in kb.bc_buttons_menu(["A", "B"]).inline_keyboard for b in row]
     assert done[:2] == [("1. A", "bce:0"), ("2. B", "bce:1")] and ("✅ Done", "bcb:done") in done
-    detail = kb.bc_button_menu(1, kb._btn(("S", "x"))).inline_keyboard
-    assert [b.callback_data for row in detail[1:] for b in row] == ["bcen:1", "bcel:1", "bcec:1", "bcd:1", "bcb:menu"]
+    detail = kb.bc_button_menu(1, kb._btn(("S", "x")), 2).inline_keyboard
+    assert [b.callback_data for row in detail[1:] for b in row] == ["bcen:1", "bcel:1", "bcec:1", "bcd:1", "bcmu:1", "bcb:menu"]
     assert [b.callback_data for b in kb.color_menu("bcc:n:0", "bcb:menu").inline_keyboard[0]] == ["bcc:n:0:none", "bcc:n:0:primary"]
 
 
@@ -198,3 +198,17 @@ async def test_send_custom_uses_layout():
     btns = [{"text": t, "alt": None, "icon": None, "url": "https://t.me/x", "style": None} for t in "AB"]
     await send_custom(bot, 5, {"text": "Hi", "media": None, "buttons": btns, "layout": 2}, User(1, "B", False), "")
     assert len(bot.send_message.call_args.kwargs["reply_markup"].inline_keyboard[0]) == 2
+
+
+def test_move_item_and_menus():
+    import keyboards as kb
+    from utils import move_item
+    items = ["A", "B", "C"]
+    assert move_item(items, 2, -1) == 1 and items == ["A", "C", "B"]
+    assert move_item(items, 0, -1) is None and move_item(items, 2, 1) is None and move_item(items, 5, -1) is None
+    sample = kb._btn(("S", "x"))
+    data = lambda m: [b.callback_data for row in m.inline_keyboard for b in row]
+    assert "btmu:start:0" not in data(kb.button_menu("start", 0, sample, 3))
+    assert {"btmu:start:1", "btmd:start:1"} <= set(data(kb.button_menu("start", 1, sample, 3)))
+    assert "bcmd:2" not in data(kb.bc_button_menu(2, sample, 3)) and "bcmu:2" in data(kb.bc_button_menu(2, sample, 3))
+    assert not {"bcmu:0", "bcmd:0"} & set(data(kb.bc_button_menu(0, sample, 1)))
