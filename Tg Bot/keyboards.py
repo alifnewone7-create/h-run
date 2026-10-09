@@ -167,8 +167,7 @@ def channel_delete_confirm() -> InlineKeyboardMarkup:
 
 def channel_picker() -> ReplyKeyboardMarkup:
     # only "Invite Users via Link" – the one right needed to approve join requests
-    fields = ChatAdministratorRights.model_fields
-    rights = ChatAdministratorRights(**{k: k == "can_invite_users" for k, f in fields.items() if f.is_required()})
+    rights = ChatAdministratorRights(**{k: k == "can_invite_users" for k in ChatAdministratorRights.model_fields})
     request = KeyboardButtonRequestChat(
         request_id=CHANNEL_REQUEST_ID,
         chat_is_channel=True,
