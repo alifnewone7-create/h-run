@@ -1,16 +1,15 @@
 import json
-from datetime import timedelta
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import asyncpg
 
-PERIODS = {
-    "24h": timedelta(hours=24),
-    "7d": timedelta(days=7),
-    "30d": timedelta(days=30),
-    "all": None,
+AUDIENCE_LABELS = {"joined": "Joined", "pending": "Pending", "leaved": "Leaved", "all": "All"}
+_AUDIENCES = {
+    "joined": "SELECT user_id FROM members WHERE status = 'joined'",
+    "pending": "SELECT user_id FROM join_requests WHERE status = 'pending'",
+    "leaved": "SELECT user_id FROM members WHERE status = 'left'",
+    "all": "SELECT user_id FROM users UNION SELECT user_id FROM members UNION SELECT user_id FROM join_requests",
 }
-PERIOD_LABELS = {"24h": "24 Hours", "7d": "7 Days", "30d": "30 Days", "all": "All Time"}
 _INTERVALS = {"24h": "24 hours", "7d": "7 days", "30d": "30 days"}
 
 DEFAULT_TEXT = (
@@ -112,21 +111,19 @@ async def set_blocked(user_id: int, blocked: bool = True) -> None:
     await pool.execute("UPDATE users SET is_blocked = $2 WHERE user_id = $1", user_id, blocked)
 
 
-async def count_users(period: str) -> int:
-    return await pool.fetchval(
-        "SELECT COUNT(*) FROM users WHERE NOT is_blocked "
-        "AND ($1::interval IS NULL OR last_active >= now() - $1::interval)",
-        PERIODS[period],
+def _audience_sql(audience: str) -> str:
+    return (
+        f"SELECT DISTINCT t.user_id FROM ({_AUDIENCES[audience]}) t "
+        "WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.user_id = t.user_id AND u.is_blocked)"
     )
 
 
-async def get_user_ids(period: str) -> list[int]:
-    rows = await pool.fetch(
-        "SELECT user_id FROM users WHERE NOT is_blocked "
-        "AND ($1::interval IS NULL OR last_active >= now() - $1::interval)",
-        PERIODS[period],
-    )
-    return [r["user_id"] for r in rows]
+async def count_users(audience: str) -> int:
+    return await pool.fetchval(f"SELECT COUNT(*) FROM ({_audience_sql(audience)}) a")
+
+
+async def get_user_ids(audience: str) -> list[int]:
+    return [r["user_id"] for r in await pool.fetch(_audience_sql(audience))]
 
 
 # ---------- join requests ----------

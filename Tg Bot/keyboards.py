@@ -1,6 +1,5 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from database import PERIOD_LABELS
 
 BACK = ("⬅️ Back", "adm:home", "danger")
 STYLES = {"none": "⚪ Default", "primary": "🔵 Blue", "success": "🟢 Green", "danger": "🔴 Red"}
@@ -73,19 +72,31 @@ def button_menu(kind: str, i: int, sample: InlineKeyboardButton) -> InlineKeyboa
     return kb
 
 
-def color_menu(kind: str, i: int) -> InlineKeyboardMarkup:
-    opts = [(label, f"btc:{kind}:{i}:{key}", *([key] if key != "none" else [])) for key, label in STYLES.items()]
-    return _build([opts[:2], opts[2:], [("⬅️ Back", f"bte:{kind}:{i}", "danger")]])
+def color_menu(prefix: str, back: str) -> InlineKeyboardMarkup:
+    opts = [(label, f"{prefix}:{key}", *([key] if key != "none" else [])) for key, label in STYLES.items()]
+    return _build([opts[:2], opts[2:], [("⬅️ Back", back, "danger")]])
 
 
 # ---------- broadcast / stats ----------
+AUDIENCES = {"joined": "🟢 Joined Users", "pending": "⏳ Pending Users", "leaved": "🚪 Leaved Users", "all": "👥 All Users"}
+
+
 def broadcast_menu(counts: dict[str, int]) -> InlineKeyboardMarkup:
-    btn = lambda p, st: (f"{PERIOD_LABELS[p]} ({counts[p]})", f"bc:{p}", st)
+    btn = lambda a, st: (f"{AUDIENCES[a]} ({counts[a]})", f"bc:{a}", st)
     return _build([
-        [btn("24h", "primary"), btn("7d", "success")],
-        [btn("30d", "success"), btn("all", "primary")],
+        [btn("joined", "success"), btn("pending", "primary")],
+        [btn("leaved", "danger"), btn("all", "success")],
         [BACK],
     ])
+
+
+def bc_buttons_menu(has_buttons: bool) -> InlineKeyboardMarkup:
+    rows = [[("➕ Add Button", "bcb:add", "success")]]
+    if has_buttons:
+        rows.append([("✅ Done", "bcb:done", "primary"), ("🗑 Remove Last", "bcb:undo", "danger")])
+    else:
+        rows.append([("⏭ Skip", "bcb:done", "primary")])
+    return _build(rows + [[("❌ Cancel", "adm:cancel", "danger")]])
 
 
 def stats_menu() -> InlineKeyboardMarkup:

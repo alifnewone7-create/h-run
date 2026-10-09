@@ -1,5 +1,4 @@
 import html
-import re
 
 from telegram import CallbackQuery, Message, Update
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
@@ -7,12 +6,14 @@ from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 import database as db
 import keyboards as kb
 from utils import (
+    MAX_BUTTONS,
     admin_only,
     button_label,
     count_tg_emoji,
     extract_media,
     html_text,
     make_button,
+    normalize_url,
     parse_button_name,
     render,
     safe_edit,
@@ -28,19 +29,10 @@ DESC = {
     "welcome": "Sent when a user requests to join your channel.",
 }
 VARS_HELP = "<code>{first_name}</code>  <code>{username}</code>  <code>{channel}</code>"
-MAX_BUTTONS = 20
-URL_RE = re.compile(r"^(https?|tg)://\S+$")
 
 
 def _args(cb: CallbackQuery) -> list[str]:
     return cb.data.split(":")[1:]
-
-
-def normalize_url(raw: str) -> str | None:
-    url = raw.strip()
-    if url.startswith(("t.me/", "www.")):
-        url = "https://" + url
-    return url if URL_RE.match(url) else None
 
 
 # ---------- screens ----------
@@ -275,7 +267,7 @@ async def cb_button_color(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cb = update.callback_query
     kind, i = _args(cb)
     if await _button_or_alert(cb, kind, int(i)):
-        await safe_edit(cb.message, "🎨 <b>Choose the button color</b>", kb.color_menu(kind, int(i)))
+        await safe_edit(cb.message, "🎨 <b>Choose the button color</b>", kb.color_menu(f"btc:{kind}:{i}", f"bte:{kind}:{i}"))
         await cb.answer()
 
 
@@ -341,7 +333,7 @@ async def on_button_url(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await db.set_msg(kind, cfg)
         await message.reply_text(
             "🎨 <b>New Button – Step 3/3</b>\n\nChoose the button color:",
-            reply_markup=to_ptb(kb.color_menu(kind, len(cfg["buttons"]) - 1)),
+            reply_markup=to_ptb(kb.color_menu(f"btc:{kind}:{len(cfg['buttons']) - 1}", f"bte:{kind}:{len(cfg['buttons']) - 1}")),
         )
         return
     cfg["buttons"][idx]["url"] = url

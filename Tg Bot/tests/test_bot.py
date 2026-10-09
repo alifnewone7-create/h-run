@@ -35,7 +35,7 @@ def test_no_aiogram_runtime():
 
 def test_bot_states_registered():
     import bot
-    assert set(bot.STATES) == {"bc_wait", "wlc_text", "wlc_media", "btn_name", "btn_url"}
+    assert set(bot.STATES) == {"bc_wait", "bc_btn_name", "bc_btn_url", "wlc_text", "wlc_media", "btn_name", "btn_url"}
 
 
 def test_keyboards_coloured_and_converted():
@@ -130,7 +130,7 @@ async def test_send_custom_photo_and_fallback():
     ("not a link", None),
 ])
 def test_normalize_url(raw, expected):
-    from handlers.wlc import normalize_url
+    from utils import normalize_url
     assert normalize_url(raw) == expected
 
 
@@ -150,3 +150,28 @@ async def test_member_join_and_leave(monkeypatch):
     await j.on_member(upd(left, member), None)
     await j.on_member(upd(member, left), None)
     assert calls == [("member", 5, -100, "joined"), ("approve", 5, -100), ("member", 5, -100, "left")]
+
+
+def test_broadcast_menus():
+    import keyboards as kb
+    rows = kb.broadcast_menu({"joined": 3, "pending": 2, "leaved": 1, "all": 6}).inline_keyboard
+    texts = [b.text for row in rows for b in row]
+    assert texts[:4] == ["🟢 Joined Users (3)", "⏳ Pending Users (2)", "🚪 Leaved Users (1)", "👥 All Users (6)"]
+    assert [b.callback_data for row in rows for b in row][:4] == ["bc:joined", "bc:pending", "bc:leaved", "bc:all"]
+    skip = [b.callback_data for row in kb.bc_buttons_menu(False).inline_keyboard for b in row]
+    assert skip == ["bcb:add", "bcb:done", "adm:cancel"]
+    done = [b.text for row in kb.bc_buttons_menu(True).inline_keyboard for b in row]
+    assert "✅ Done" in done and "🗑 Remove Last" in done
+    assert [b.callback_data for b in kb.color_menu("bcc", "bcb:menu").inline_keyboard[0]] == ["bcc:none", "bcc:primary"]
+
+
+async def test_run_broadcast_with_buttons(monkeypatch):
+    import utils
+    monkeypatch.setattr(utils.db, "get_user_ids", AsyncMock(return_value=[1, 2]))
+    monkeypatch.setattr(utils.asyncio, "sleep", AsyncMock())
+    bot = AsyncMock()
+    markup = utils.to_ptb(utils.build_markup([{"text": "Go", "url": "https://t.me/x", "style": "success"}]))
+    await utils.run_broadcast(bot, 9, 9, 5, "joined", markup)
+    assert bot.copy_message.call_count == 2
+    assert bot.copy_message.call_args.kwargs["reply_markup"] is markup
+    assert "Joined Users" in bot.send_message.call_args.args[1]

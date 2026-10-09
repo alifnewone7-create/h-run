@@ -21,6 +21,8 @@ log = logging.getLogger(__name__)
 ADMIN = filters.User(user_id=ADMIN_IDS)
 TG_EMOJI = re.compile(r'<tg-emoji emoji-id="\d+">(.*?)</tg-emoji>', re.S)
 TAGS = re.compile(r"<[^>]+>")
+URL_RE = re.compile(r"^(https?|tg)://\S+$")
+MAX_BUTTONS = 20
 CAPTION_LIMIT = 1024
 SENDERS = {
     "photo": "send_photo",
@@ -90,6 +92,13 @@ def _plain_len(html_text: str) -> int:
 
 
 # ---------- media / buttons ----------
+def normalize_url(raw: str) -> str | None:
+    url = raw.strip()
+    if url.startswith(("t.me/", "www.")):
+        url = "https://" + url
+    return url if URL_RE.match(url) else None
+
+
 def extract_media(msg: Message) -> dict | None:
     if msg.photo:
         return {"type": "photo", "file_id": msg.photo[-1].file_id}
@@ -180,16 +189,16 @@ async def safe_edit(msg: Message, text: str, kb: InlineKeyboardMarkup | None = N
 
 
 # ---------- broadcast ----------
-async def _copy(bot: Bot, uid: int, from_chat: int, msg_id: int, retries: int = 3) -> str:
+async def _copy(bot: Bot, uid: int, from_chat: int, msg_id: int, markup=None, retries: int = 3) -> str:
     try:
-        await bot.copy_message(uid, from_chat, msg_id)
+        await bot.copy_message(uid, from_chat, msg_id, reply_markup=markup)
         return "sent"
     except RetryAfter as e:
         if retries == 0:
             return "failed"
         wait = e.retry_after
         await asyncio.sleep((wait.total_seconds() if isinstance(wait, timedelta) else wait) + 1)
-        return await _copy(bot, uid, from_chat, msg_id, retries - 1)
+        return await _copy(bot, uid, from_chat, msg_id, markup, retries - 1)
     except Forbidden:
         await db.set_blocked(uid)
         return "blocked"
@@ -207,16 +216,18 @@ def _report(title: str, total: int, res: dict) -> str:
     )
 
 
-async def run_broadcast(bot: Bot, admin_chat: int, from_chat: int, msg_id: int, period: str) -> None:
-    ids = await db.get_user_ids(period)
+async def run_broadcast(
+    bot: Bot, admin_chat: int, from_chat: int, msg_id: int, audience: str, markup: PtbMarkup | None = None
+) -> None:
+    ids = await db.get_user_ids(audience)
     total = len(ids)
     res = {"sent": 0, "blocked": 0, "failed": 0}
-    label = db.PERIOD_LABELS[period]
+    label = f"{db.AUDIENCE_LABELS[audience]} Users"
     status = await bot.send_message(admin_chat, _report(f"📢 <b>Broadcast running</b> ({label})", total, res))
     for i, uid in enumerate(ids, 1):
-        res[await _copy(bot, uid, from_chat, msg_id)] += 1
+        res[await _copy(bot, uid, from_chat, msg_id, markup)] += 1
         if i % 50 == 0:
             await safe_edit(status, _report(f"📢 <b>Broadcast running</b> ({label}) {i}/{total}", total, res))
         await asyncio.sleep(0.05)
     await safe_edit(status, _report(f"✅ <b>Broadcast finished</b> ({label})", total, res))
-    log.info("Broadcast %s done: %s", period, res)
+    log.info("Broadcast %s done: %s", audience, res)

@@ -2,12 +2,26 @@ import html
 from datetime import datetime, timezone
 
 from telegram import Bot, Update
-from telegram.error import TelegramError
+from telegram.error import BadRequest, TelegramError
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 import database as db
 import keyboards as kb
-from utils import ADMIN, admin_only, count_entities, run_broadcast, safe_edit, send_panel, set_state, to_ptb
+from utils import (
+    ADMIN,
+    MAX_BUTTONS,
+    admin_only,
+    build_markup,
+    button_label,
+    count_entities,
+    normalize_url,
+    parse_button_name,
+    run_broadcast,
+    safe_edit,
+    send_panel,
+    set_state,
+    to_ptb,
+)
 
 MODE_NAMES = {"non": "Non Approve", "auto": "Auto Approve"}
 
@@ -108,23 +122,26 @@ async def cb_set_mode(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ---------- broadcast ----------
 @admin_only
 async def cb_broadcast(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    counts = {p: await db.count_users(p) for p in db.PERIODS}
+    ctx.user_data.clear()
+    counts = {a: await db.count_users(a) for a in kb.AUDIENCES}
+    lines = "\n".join(f"{label}: <b>{counts[a]}</b>" for a, label in kb.AUDIENCES.items())
     await safe_edit(
         update.callback_query.message,
-        "📢 <b>Broadcast</b>\n\nSelect which users should receive the message 👇",
+        f"📢 <b>Broadcast</b>\n\n{lines}\n\nSelect which users should receive the message 👇",
         kb.broadcast_menu(counts),
     )
     await update.callback_query.answer()
 
 
 @admin_only
-async def cb_bc_period(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+async def cb_bc_audience(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cb = update.callback_query
-    period = cb.data.split(":")[1]
-    set_state(ctx, "bc_wait", period=period)
+    audience = cb.data.split(":")[1]
+    ctx.user_data.clear()
+    set_state(ctx, "bc_wait", audience=audience)
     await safe_edit(
         cb.message,
-        f"📢 <b>Broadcast → {db.PERIOD_LABELS[period]} Users</b>\n\n"
+        f"📢 <b>Broadcast → {kb.AUDIENCES[audience]}</b> ({await db.count_users(audience)})\n\n"
         "Send the message you want to broadcast (text / photo / video / file / sticker). "
         "Formatting and ✨ Premium (custom) emoji are kept as they are.",
         kb.cancel_menu(),
@@ -132,17 +149,128 @@ async def cb_bc_period(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await cb.answer()
 
 
+def _bc_buttons_text(buttons: list[dict]) -> str:
+    rows = "\n".join(
+        f"{i + 1}. <b>{html.escape(button_label(b))}</b> – {html.escape(b['url'])} ({kb.STYLES[b['style'] or 'none']})"
+        for i, b in enumerate(buttons)
+    )
+    return (
+        f"🔘 <b>Broadcast Buttons</b> ({len(buttons)}/{MAX_BUTTONS})\n\n"
+        + (rows + "\n\n" if rows else "")
+        + "Add buttons under the broadcast message, or skip to send it without buttons."
+    )
+
+
 async def on_bc_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
-    period = ctx.user_data["period"]
-    total = await db.count_users(period)
-    set_state(ctx, "bc_confirm", from_chat=message.chat_id, msg_id=message.message_id)
-    await message.reply_text(
-        f"👆 This message will be sent to <b>{total}</b> users ({db.PERIOD_LABELS[period]}).\n"
-        f"✨ Premium emoji: <b>{count_entities(message)}</b>\n\nConfirm?",
-        reply_markup=to_ptb(kb.confirm_broadcast()),
-        do_quote=True,
+    set_state(
+        ctx, "bc_buttons",
+        from_chat=message.chat_id, msg_id=message.message_id, emoji=count_entities(message), buttons=[],
     )
+    await message.reply_text(_bc_buttons_text([]), reply_markup=to_ptb(kb.bc_buttons_menu(False)), do_quote=True)
+
+
+def bc_session(fn):
+    @admin_only
+    async def wrapper(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if "msg_id" not in ctx.user_data:
+            await update.callback_query.answer("⚠️ Broadcast session expired. Start again.", show_alert=True)
+            return
+        await fn(update, ctx)
+    return wrapper
+
+
+@bc_session
+async def cb_bc_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
+    buttons = ctx.user_data["buttons"]
+    if cb.data == "bcb:undo" and buttons:
+        buttons.pop()
+    ctx.user_data["state"] = "bc_buttons"
+    await safe_edit(cb.message, _bc_buttons_text(buttons), kb.bc_buttons_menu(bool(buttons)))
+    await cb.answer()
+
+
+@bc_session
+async def cb_bc_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
+    if len(ctx.user_data["buttons"]) >= MAX_BUTTONS:
+        await cb.answer(f"Maximum {MAX_BUTTONS} buttons", show_alert=True)
+        return
+    ctx.user_data["state"] = "bc_btn_name"
+    await safe_edit(
+        cb.message,
+        "➕ <b>Broadcast Button – Step 1/3</b>\n\nSend the button name.\n"
+        "Emoji are supported. A ✨ Premium emoji is shown as the button icon.",
+        kb.back_to("bcb:menu"),
+    )
+    await cb.answer()
+
+
+async def on_bc_btn_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    if not message.text:
+        await message.reply_text("⚠️ Please send the button name as text.")
+        return
+    name, icon, alt = parse_button_name(message)
+    set_state(ctx, "bc_btn_url", btn={"text": name, "icon": icon, "alt": alt, "style": None})
+    await message.reply_text(
+        "🔗 <b>Broadcast Button – Step 2/3</b>\n\nSend the button link (https://... or t.me/...).",
+        reply_markup=to_ptb(kb.back_to("bcb:menu")),
+    )
+
+
+async def on_bc_btn_url(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    url = normalize_url(message.text or "")
+    if not url:
+        await message.reply_text("⚠️ Invalid link. Example: <code>https://t.me/yourchannel</code>")
+        return
+    ctx.user_data["buttons"].append({**ctx.user_data.pop("btn"), "url": url})
+    ctx.user_data["state"] = "bc_buttons"
+    await message.reply_text(
+        "🎨 <b>Broadcast Button – Step 3/3</b>\n\nChoose the button color:",
+        reply_markup=to_ptb(kb.color_menu("bcc", "bcb:menu")),
+    )
+
+
+@bc_session
+async def cb_bc_color(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
+    style = cb.data.split(":")[1]
+    buttons = ctx.user_data["buttons"]
+    if buttons and style in kb.STYLES:
+        buttons[-1]["style"] = None if style == "none" else style
+    await safe_edit(cb.message, _bc_buttons_text(buttons), kb.bc_buttons_menu(bool(buttons)))
+    await cb.answer(f"Color: {kb.STYLES.get(style, '')}")
+
+
+@bc_session
+async def cb_bc_done(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cb = update.callback_query
+    data = ctx.user_data
+    markup = None
+    if data["buttons"]:
+        # preview with buttons; premium icons need the bot owner's Telegram Premium
+        try:
+            markup = to_ptb(build_markup(data["buttons"]))
+            await ctx.bot.copy_message(cb.message.chat.id, data["from_chat"], data["msg_id"], reply_markup=markup)
+        except BadRequest:
+            markup = to_ptb(build_markup(data["buttons"], icons=False))
+            await ctx.bot.copy_message(cb.message.chat.id, data["from_chat"], data["msg_id"], reply_markup=markup)
+    set_state(ctx, "bc_confirm", markup=markup)
+    total = await db.count_users(data["audience"])
+    text = (
+        f"{'👆 Preview above. ' if markup else ''}This message will be sent to <b>{total}</b> "
+        f"{kb.AUDIENCES[data['audience']]}.\n"
+        f"🔘 Buttons: <b>{len(data['buttons'])}</b>\n"
+        f"✨ Premium emoji: <b>{data['emoji']}</b>\n\nConfirm?"
+    )
+    if markup:
+        await send_panel(ctx.bot, cb.message.chat.id, text, kb.confirm_broadcast())
+    else:
+        await safe_edit(cb.message, text, kb.confirm_broadcast())
+    await cb.answer()
 
 
 @admin_only
@@ -150,12 +278,12 @@ async def cb_bc_go(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cb = update.callback_query
     data = dict(ctx.user_data)
     if data.get("state") != "bc_confirm":
-        await cb.answer()
+        await cb.answer("⚠️ Broadcast session expired. Start again.", show_alert=True)
         return
     ctx.user_data.clear()
     await safe_edit(cb.message, "🚀 Broadcast started...")
     ctx.application.create_task(
-        run_broadcast(ctx.bot, cb.message.chat.id, data["from_chat"], data["msg_id"], data["period"])
+        run_broadcast(ctx.bot, cb.message.chat.id, data["from_chat"], data["msg_id"], data["audience"], data["markup"])
     )
     await cb.answer()
 
@@ -177,7 +305,7 @@ async def cb_channels(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
 
 
-STATES = {"bc_wait": on_bc_message}
+STATES = {"bc_wait": on_bc_message, "bc_btn_name": on_bc_btn_name, "bc_btn_url": on_bc_btn_url}
 
 
 def register_commands(app: Application) -> None:
@@ -186,14 +314,18 @@ def register_commands(app: Application) -> None:
 
 
 def register_callbacks(app: Application) -> None:
-    periods = "|".join(db.PERIODS)
+    audiences = "|".join(kb.AUDIENCES)
     app.add_handlers([
         CallbackQueryHandler(cb_home, pattern=r"^adm:(home|cancel)$"),
         CallbackQueryHandler(cb_mode, pattern=r"^adm:mode$"),
         CallbackQueryHandler(cb_set_mode, pattern=r"^mode:(non|auto)$"),
         CallbackQueryHandler(cb_broadcast, pattern=r"^adm:bc$"),
-        CallbackQueryHandler(cb_bc_period, pattern=rf"^bc:({periods})$"),
+        CallbackQueryHandler(cb_bc_audience, pattern=rf"^bc:({audiences})$"),
         CallbackQueryHandler(cb_bc_go, pattern=r"^bc:go$"),
+        CallbackQueryHandler(cb_bc_menu, pattern=r"^bcb:(menu|undo)$"),
+        CallbackQueryHandler(cb_bc_add, pattern=r"^bcb:add$"),
+        CallbackQueryHandler(cb_bc_done, pattern=r"^bcb:done$"),
+        CallbackQueryHandler(cb_bc_color, pattern=r"^bcc:"),
         CallbackQueryHandler(cb_stats, pattern=r"^adm:stats$"),
         CallbackQueryHandler(cb_channels, pattern=r"^adm:channels$"),
     ])
