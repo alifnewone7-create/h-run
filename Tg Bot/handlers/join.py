@@ -48,6 +48,7 @@ async def on_member(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     was, now = is_member(ev.old_chat_member), is_member(ev.new_chat_member)
     if user.is_bot or was == now:
         return
+    await db.upsert_user(user.id, user.first_name, user.username)
     await db.set_member(user.id, ev.chat.id, "joined" if now else "left")
     if now:
         await db.approve_request(user.id, ev.chat.id)

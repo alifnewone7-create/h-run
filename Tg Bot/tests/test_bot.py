@@ -139,6 +139,7 @@ async def test_member_join_and_leave(monkeypatch):
 
     import handlers.join as j
     calls = []
+    monkeypatch.setattr(j.db, "upsert_user", AsyncMock())
     monkeypatch.setattr(j.db, "set_member", AsyncMock(side_effect=lambda *a: calls.append(("member", *a))))
     monkeypatch.setattr(j.db, "approve_request", AsyncMock(side_effect=lambda *a: calls.append(("approve", *a))))
     user, chat = User(5, "Bob", False), Chat(-100, "channel")

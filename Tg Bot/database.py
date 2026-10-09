@@ -61,6 +61,9 @@ DELETE FROM join_requests a USING join_requests b
     WHERE a.user_id = b.user_id AND a.chat_id = b.chat_id
     AND (b.status = 'approved', b.id) > (a.status = 'approved', a.id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_requests_user_chat ON join_requests (user_id, chat_id);
+INSERT INTO users (user_id, joined_at, last_active)
+    SELECT user_id, MIN(updated_at), MAX(updated_at) FROM members GROUP BY user_id
+    ON CONFLICT (user_id) DO NOTHING;
 CREATE INDEX IF NOT EXISTS idx_users_joined ON users (joined_at);
 CREATE INDEX IF NOT EXISTS idx_users_active ON users (last_active);
 CREATE INDEX IF NOT EXISTS idx_requests_created ON join_requests (created_at);
@@ -223,13 +226,12 @@ def _cols(col: str, prefix: str) -> str:
 
 async def get_stats() -> dict:
     users = await pool.fetchrow(
-        f"SELECT {_cols('joined_at', 'new')}, {_cols('last_active', 'act')}, "
+        f"SELECT {_cols('joined_at', 'new')}, "
         "COUNT(*) FILTER (WHERE started) AS started, "
         "COUNT(*) FILTER (WHERE is_blocked) AS blocked FROM users"
     )
     reqs = await pool.fetchrow(
-        f"SELECT {_cols('created_at', 'req')}, "
-        "COUNT(*) FILTER (WHERE status = 'approved') AS approved, "
+        "SELECT COUNT(*) FILTER (WHERE status = 'approved') AS approved, "
         "COUNT(*) FILTER (WHERE status = 'pending') AS pending FROM join_requests"
     )
     members = await pool.fetchrow(

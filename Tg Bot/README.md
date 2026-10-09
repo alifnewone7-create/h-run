@@ -36,7 +36,7 @@ Requires Python 3.10+.
   - **👋 Wlc Msg** – sent when a user requests to join your channel.
   - Each has **📝 Set Text** (all formatting + Premium emoji, variables `{first_name}`, `{username}`, `{channel}`), **🖼 Set Media** (photo / video / audio / GIF / voice / document, text becomes the caption, removable), **🔘 Set Button** (add multiple URL buttons; each with name + emoji/Premium emoji icon, link and color: Default / Blue / Green / Red; edit, delete or ⬆️⬇️ move any button to change the order, 📐 Layout: 1 per line or 2 per line side by side), **👁 Preview** and **♻️ Reset**.
 - **📢 Broadcast** – choose 🟢 Joined Users (in the channel) / ⏳ Pending Users (request pending) / 🚪 Leaved Users (left the channel) / 👥 All Users (everyone), each with its user count. Send any message (text/photo/video/file/sticker, formatting + Premium emoji kept), then **➕ Add Button** (multiple buttons, each with name + emoji/Premium emoji icon, link and color) or **⏭ Skip** to send without buttons. Choose 📐 Layout: 1 per line or 2 per line (side by side). Tap any added button to ✏️ edit its name, 🔗 link, 🎨 color, ⬆️⬇️ move it up/down to change the order, or 🗑 delete it before sending. A preview is shown before sending, with live progress and a final report.
-- **📊 Statistics** – realtime New Users, Active Users, Join Requests (24h / 7d / 30d / All Time), approved/pending (one row per user + channel – a pending request moves to approved once the user joins), 🟢 Joined / 🚪 Leaved (tracked from channel join/leave events), 👥 Channel Members (live from Telegram), bot started, blocked, channels. Includes a 🔄 Refresh button.
+- **📊 Statistics** – realtime 👥 New Users (24h / 7d / 30d / All Time – everyone the bot has seen: /start, join request or channel join), ✅ Approved / ⏳ Pending (one row per user + channel – a pending request moves to approved once the user joins), 🟢 Joined / 🚪 Leaved (tracked from channel join/leave events), 👥 Channel Members (live from Telegram), bot started, blocked, channels. Includes a 🔄 Refresh button.
 - **📡 Channels** – channels where the bot is an admin.
 
 `/cancel` – cancel the current step.
@@ -50,6 +50,6 @@ Requires Python 3.10+.
 - Media is stored as a Telegram `file_id`, which belongs to the current bot token – if you change the token, upload the media again.
 
 ## Notes
-- Periods (24h/7d/30d) mean users active in that time (join request or `/start`).
+- New Users periods (24h/7d/30d) count users whose **first** contact with the bot (`/start`, join request or channel join) was within that time; All Time = every user.
 - Telegram rule: after a join request, the bot can message the user only while the request is pending. To receive **broadcasts**, a user must press `/start` in the bot once – put the bot link (`https://t.me/<bot_username>?start=1`) in your welcome text.
 - Run the bot in one place only – polling the same token from two places causes a conflict.

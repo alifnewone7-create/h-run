@@ -75,8 +75,6 @@ async def stats_text(bot: Bot) -> str:
     return (
         "📊 <b>Statistics</b> (realtime)\n\n"
         + _period_block("👥 <b>New Users</b>", s, "new") + "\n"
-        + _period_block("🔥 <b>Active Users</b>", s, "act") + "\n"
-        + _period_block("📥 <b>Join Requests</b>", s, "req") + "\n"
         f"✅ Approved: <b>{s['approved']}</b>  ⏳ Pending: <b>{s['pending']}</b>\n"
         f"🟢 Joined: <b>{s['joined']}</b>  🚪 Leaved: <b>{s['leaved']}</b>\n"
         f"👥 Channel Members: <b>{s['channel_members']}</b>\n"
