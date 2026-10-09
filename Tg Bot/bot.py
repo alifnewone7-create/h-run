@@ -7,7 +7,7 @@ from telegram.ext import Application, ContextTypes, Defaults, MessageHandler
 
 import database as db
 from config import ADMIN_IDS, BOT_TOKEN, DATABASE_URL
-from handlers import admin, join, user, wlc
+from handlers import admin, channel, join, user, wlc
 from utils import ADMIN
 
 STATES = {**admin.STATES, **wlc.STATES}
@@ -61,6 +61,8 @@ def main() -> None:
     user.register(app)
     admin.register_callbacks(app)
     wlc.register_callbacks(app)
+    channel.register_callbacks(app)
+    channel.register_messages(app)
     app.add_handler(MessageHandler(ADMIN, on_state))
     join.register(app)
     app.run_polling(allowed_updates=Update.ALL_TYPES)

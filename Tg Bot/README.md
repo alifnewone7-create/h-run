@@ -25,9 +25,11 @@ Configuration lives in `.env`:
 Requires Python 3.10+.
 
 ## Channel setup
-1. Add the bot to your private channel as **Admin** with the **"Invite users via link"** (Add Members) permission.
+1. Start the bot, send `/admin` → **📡 Channel** → **➕ Add Channel** → **📡 Select Channel** and pick your channel. Telegram adds the bot as admin with **only one permission: "Invite Users via Link"** (needed to approve join requests).
 2. Enable **"Request Admin Approval"** on the channel invite link.
-3. Every join request now triggers the bot's message. Multiple channels are supported.
+3. Every join request in that channel now triggers the bot's message.
+- Only **1 channel** can be added. To change it, **🗑 Delete Channel** (the bot leaves the channel) and add the new one.
+- The bot works only in the added channel – join requests / joins / leaves from other chats are ignored. No "bot is now admin" notifications are sent.
 
 ## Admin Panel – `/admin`
 - **✅ Non / Approve** – `Non Approve` (message only) / `Auto Approve` (message + approve the request).
@@ -36,8 +38,8 @@ Requires Python 3.10+.
   - **👋 Wlc Msg** – sent when a user requests to join your channel.
   - Each has **📝 Set Text** (all formatting + Premium emoji, variables `{first_name}`, `{username}`, `{channel}`), **🖼 Set Media** (photo / video / audio / GIF / voice / document, text becomes the caption, removable), **🔘 Set Button** (add multiple URL buttons; each with name + emoji/Premium emoji icon, link and color: Default / Blue / Green / Red; edit, delete or ⬆️⬇️ move any button to change the order, 📐 Layout: 1 per line or 2 per line side by side) and **👁 Preview**.
 - **📢 Broadcast** – choose 🟢 Joined Users (in the channel) / ⏳ Pending Users (request pending) / 🚪 Leaved Users (left the channel) / 👥 All Users (everyone), each with its user count. Send any message (text/photo/video/file/sticker, formatting + Premium emoji kept), then **➕ Add Button** (multiple buttons, each with name + emoji/Premium emoji icon, link and color) or **⏭ Skip** to send without buttons. Choose 📐 Layout: 1 per line or 2 per line (side by side). Tap any added button to ✏️ edit its name, 🔗 link, 🎨 color, ⬆️⬇️ move it up/down to change the order, or 🗑 delete it before sending. A preview is shown before sending, with live progress and a final report.
-- **📊 Statistics** – realtime 👥 New Users (24h / 7d / 30d / All Time – everyone the bot has seen: /start, join request or channel join), ✅ Approved / ⏳ Pending (one row per user + channel – a pending request moves to approved once the user joins), 🟢 Joined / 🚪 Leaved (tracked from channel join/leave events), 👥 Channel Members (live from Telegram), bot started, blocked, channels. Includes a 🔄 Refresh button.
-- **📡 Channels** – channels where the bot is an admin.
+- **📊 Statistics** – realtime 👥 New Users (24h / 7d / 30d / All Time – everyone the bot has seen: /start, join request or channel join), ✅ Approved / ⏳ Pending (one row per user + channel – a pending request moves to approved once the user joins), 🟢 Joined / 🚪 Leaved (tracked from channel join/leave events), 👥 Channel Members (live from Telegram), bot started, blocked. Includes a 🔄 Refresh button.
+- **📡 Channel** – shows the added channel and its permission; ➕ Add Channel (channel picker) or 🗑 Delete Channel (with confirmation). Only 1 channel.
 
 `/cancel` – cancel the current step.
 

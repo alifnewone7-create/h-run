@@ -31,11 +31,12 @@ MODE_NAMES = {"non": "Non Approve", "auto": "Auto Approve"}
 # ---------- screens ----------
 async def home_text() -> str:
     mode = await db.get_setting("approve_mode", "non")
-    channels = len(await db.list_channels())
+    ch = await db.get_channel()
+    channel = html.escape(ch["title"] or "Untitled") if ch else "Not added"
     return (
         "🛠 <b>Admin Panel</b>\n\n"
         f"⚙️ Mode: <b>{MODE_NAMES[mode]}</b>\n"
-        f"📡 Channels: <b>{channels}</b>\n\n"
+        f"📡 Channel: <b>{channel}</b>\n\n"
         "Select a section below 👇"
     )
 
@@ -60,9 +61,10 @@ def _period_block(title: str, s: dict, prefix: str) -> str:
 
 
 async def refresh_member_counts(bot: Bot) -> None:
-    for r in await db.list_channels():
+    ch = await db.get_channel()
+    if ch:
         try:
-            await db.set_member_count(r["chat_id"], await bot.get_chat_member_count(r["chat_id"]))
+            await db.set_member_count(ch["chat_id"], await bot.get_chat_member_count(ch["chat_id"]))
         except TelegramError:
             pass
 
@@ -79,7 +81,7 @@ async def stats_text(bot: Bot) -> str:
         f"🟢 Joined: <b>{s['joined']}</b>  🚪 Leaved: <b>{s['leaved']}</b>\n"
         f"👥 Channel Members: <b>{s['channel_members']}</b>\n"
         f"🤖 Bot started: <b>{s['started']}</b>  🚫 Blocked: <b>{s['blocked']}</b>\n"
-        f"📡 Channels: <b>{s['channels']}</b>  ⚙️ Mode: <b>{MODE_NAMES[mode]}</b>\n\n"
+        f"⚙️ Mode: <b>{MODE_NAMES[mode]}</b>\n\n"
         f"🕒 Updated: <code>{now}</code>"
     )
 
@@ -401,16 +403,6 @@ async def cb_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer("🔄 Updated")
 
 
-# ---------- channels ----------
-@admin_only
-async def cb_channels(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    rows = await db.list_channels()
-    body = "\n".join(f"• <b>{html.escape(r['title'] or 'Untitled')}</b> (<code>{r['chat_id']}</code>)" for r in rows)
-    text = "📡 <b>Channels (bot admin)</b>\n\n" + (body or "No channels yet. Make the bot an admin in your channel.")
-    await safe_edit(update.callback_query.message, text, kb.back_menu())
-    await update.callback_query.answer()
-
-
 STATES = {"bc_wait": on_bc_message, "bc_btn_name": on_bc_btn_name, "bc_btn_url": on_bc_btn_url}
 
 
@@ -439,5 +431,4 @@ def register_callbacks(app: Application) -> None:
         CallbackQueryHandler(cb_bc_move, pattern=r"^bcm[ud]:\d+$"),
         CallbackQueryHandler(cb_bc_color, pattern=r"^bcc:[ne]:\d+:\w+$"),
         CallbackQueryHandler(cb_stats, pattern=r"^adm:stats$"),
-        CallbackQueryHandler(cb_channels, pattern=r"^adm:channels$"),
     ])

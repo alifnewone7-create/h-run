@@ -5,11 +5,12 @@ import re
 from datetime import timedelta
 from functools import wraps
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from aiogram.types import MessageEntity as AioEntity
 from aiogram.utils.text_decorations import html_decoration
-from telegram import Bot, Message, Update, User
+from telegram import Bot, KeyboardButton, Message, Update, User
 from telegram import InlineKeyboardMarkup as PtbMarkup
+from telegram import ReplyKeyboardMarkup as PtbReplyMarkup
 from telegram.error import BadRequest, Forbidden, RetryAfter, TelegramError
 from telegram.ext import ContextTypes, filters
 
@@ -57,8 +58,14 @@ def html_text(msg: Message) -> str:
     return html_decoration.unparse(text, [AioEntity.model_validate(e.to_dict()) for e in entities])
 
 
-def to_ptb(kb: InlineKeyboardMarkup | None) -> PtbMarkup | None:
-    return PtbMarkup.de_json(kb.model_dump(exclude_none=True)) if kb else None
+def to_ptb(kb: InlineKeyboardMarkup | ReplyKeyboardMarkup | None) -> PtbMarkup | PtbReplyMarkup | None:
+    if not kb:
+        return None
+    data = kb.model_dump(exclude_none=True)
+    if isinstance(kb, ReplyKeyboardMarkup):
+        rows = [[KeyboardButton.de_json(b) for b in row] for row in data.pop("keyboard")]
+        return PtbReplyMarkup(rows, **data)
+    return PtbMarkup.de_json(data)
 
 
 # ---------- text helpers ----------

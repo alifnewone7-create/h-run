@@ -1,4 +1,11 @@
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import (
+    ChatAdministratorRights,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    KeyboardButtonRequestChat,
+    ReplyKeyboardMarkup,
+)
 
 
 BACK = ("⬅️ Back", "adm:home", "danger")
@@ -19,7 +26,7 @@ def main_menu() -> InlineKeyboardMarkup:
     return _build([
         [("✅ Non / Approve", "adm:mode", "success")],
         [("👋 Wlc Setting", "adm:wlc", "primary"), ("📢 Broadcast", "adm:bc", "success")],
-        [("📊 Statistics", "adm:stats", "success"), ("📡 Channels", "adm:channels", "primary")],
+        [("📊 Statistics", "adm:stats", "success"), ("📡 Channel", "adm:channels", "primary")],
     ])
 
 
@@ -142,3 +149,38 @@ def confirm_broadcast() -> InlineKeyboardMarkup:
 
 def back_menu() -> InlineKeyboardMarkup:
     return _build([[BACK]])
+
+
+# ---------- channel ----------
+CHANNEL_REQUEST_ID = 1
+PICKER_CANCEL = "❌ Cancel"
+
+
+def channel_menu(has_channel: bool) -> InlineKeyboardMarkup:
+    action = ("🗑 Delete Channel", "ch:del", "danger") if has_channel else ("➕ Add Channel", "ch:add", "success")
+    return _build([[action], [BACK]])
+
+
+def channel_delete_confirm() -> InlineKeyboardMarkup:
+    return _build([[("✅ Yes, Delete", "ch:delok", "danger"), ("❌ No", "adm:channels", "primary")]])
+
+
+def channel_picker() -> ReplyKeyboardMarkup:
+    # only "Invite Users via Link" – the one right needed to approve join requests
+    fields = ChatAdministratorRights.model_fields
+    rights = ChatAdministratorRights(**{k: k == "can_invite_users" for k, f in fields.items() if f.is_required()})
+    request = KeyboardButtonRequestChat(
+        request_id=CHANNEL_REQUEST_ID,
+        chat_is_channel=True,
+        user_administrator_rights=rights,
+        bot_administrator_rights=rights,
+        request_title=True,
+    )
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📡 Select Channel", request_chat=request, style="success")],
+            [KeyboardButton(text=PICKER_CANCEL, style="danger")],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )

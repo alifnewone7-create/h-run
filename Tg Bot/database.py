@@ -57,6 +57,8 @@ CREATE TABLE IF NOT EXISTS members (
 );
 ALTER TABLE join_requests ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 ALTER TABLE channels ADD COLUMN IF NOT EXISTS member_count INTEGER NOT NULL DEFAULT 0;
+DELETE FROM channels WHERE chat_id <> COALESCE(
+    (SELECT chat_id FROM channels WHERE is_admin ORDER BY updated_at DESC LIMIT 1), 0);
 DELETE FROM join_requests a USING join_requests b
     WHERE a.user_id = b.user_id AND a.chat_id = b.chat_id
     AND (b.status = 'approved', b.id) > (a.status = 'approved', a.id);
@@ -162,23 +164,24 @@ async def set_member(user_id: int, chat_id: int, status: str) -> None:
 
 
 # ---------- channels ----------
-async def upsert_channel(chat_id: int, title: str | None, is_admin: bool) -> None:
-    await pool.execute(
-        """
-        INSERT INTO channels (chat_id, title, is_admin) VALUES ($1, $2, $3)
-        ON CONFLICT (chat_id) DO UPDATE SET
-            title = EXCLUDED.title, is_admin = EXCLUDED.is_admin, updated_at = now()
-        """,
-        chat_id, title, is_admin,
-    )
+# only one channel is stored
+async def get_channel() -> asyncpg.Record | None:
+    return await pool.fetchrow("SELECT chat_id, title FROM channels ORDER BY updated_at DESC LIMIT 1")
+
+
+async def set_channel(chat_id: int, title: str | None) -> None:
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute("DELETE FROM channels")
+        await conn.execute("INSERT INTO channels (chat_id, title, is_admin) VALUES ($1, $2, TRUE)", chat_id, title)
+
+
+async def delete_channel() -> None:
+    await pool.execute("DELETE FROM channels")
 
 
 async def set_member_count(chat_id: int, count: int) -> None:
     await pool.execute("UPDATE channels SET member_count = $2 WHERE chat_id = $1", chat_id, count)
 
-
-async def list_channels() -> list[asyncpg.Record]:
-    return await pool.fetch("SELECT chat_id, title FROM channels WHERE is_admin ORDER BY updated_at DESC")
 
 
 # ---------- settings ----------
@@ -233,8 +236,5 @@ async def get_stats() -> dict:
         "SELECT COUNT(*) FILTER (WHERE status = 'joined') AS joined, "
         "COUNT(*) FILTER (WHERE status = 'left') AS leaved FROM members"
     )
-    channels = await pool.fetchrow(
-        "SELECT COUNT(*) AS channels, COALESCE(SUM(member_count), 0) AS channel_members "
-        "FROM channels WHERE is_admin"
-    )
-    return {**dict(users), **dict(reqs), **dict(members), **dict(channels)}
+    channel_members = await pool.fetchval("SELECT COALESCE(SUM(member_count), 0) FROM channels")
+    return {**dict(users), **dict(reqs), **dict(members), "channel_members": channel_members}

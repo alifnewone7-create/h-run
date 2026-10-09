@@ -2,7 +2,7 @@
 import pathlib
 import py_compile
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from telegram import Chat, InlineKeyboardMarkup, Message, MessageEntity, PhotoSize, User
@@ -153,6 +153,7 @@ async def test_member_join_and_leave(monkeypatch):
     import handlers.join as j
     calls = []
     monkeypatch.setattr(j.db, "upsert_user", AsyncMock())
+    monkeypatch.setattr(j.db, "get_channel", AsyncMock(return_value={"chat_id": -100, "title": "Main"}))
     monkeypatch.setattr(j.db, "set_member", AsyncMock(side_effect=lambda *a: calls.append(("member", *a))))
     monkeypatch.setattr(j.db, "approve_request", AsyncMock(side_effect=lambda *a: calls.append(("approve", *a))))
     user, chat = User(5, "Bob", False), Chat(-100, "channel")
@@ -226,3 +227,30 @@ def test_move_item_and_menus():
     assert {"btmu:start:1", "btmd:start:1"} <= set(data(kb.button_menu("start", 1, sample, 3)))
     assert "bcmd:2" not in data(kb.bc_button_menu(2, sample, 3)) and "bcmu:2" in data(kb.bc_button_menu(2, sample, 3))
     assert not {"bcmu:0", "bcmd:0"} & set(data(kb.bc_button_menu(0, sample, 1)))
+
+
+def test_channel_picker_only_invite_permission():
+    import keyboards as kb
+    from telegram import ReplyKeyboardMarkup
+    from utils import to_ptb
+    markup = to_ptb(kb.channel_picker())
+    assert isinstance(markup, ReplyKeyboardMarkup)
+    btn = markup.keyboard[0][0]
+    req = btn.request_chat
+    assert req.request_id == kb.CHANNEL_REQUEST_ID and req.chat_is_channel and req.request_title
+    rights = req.bot_administrator_rights.to_dict()
+    assert [k for k, v in rights.items() if v is True] == ["can_invite_users"]
+    assert markup.keyboard[1][0].text == kb.PICKER_CANCEL
+    assert [b.callback_data for r in kb.channel_menu(False).inline_keyboard for b in r] == ["ch:add", "adm:home"]
+    assert [b.callback_data for r in kb.channel_menu(True).inline_keyboard for b in r] == ["ch:del", "adm:home"]
+
+
+async def test_join_request_ignored_for_other_channel(monkeypatch):
+    import handlers.join as j
+    monkeypatch.setattr(j.db, "get_channel", AsyncMock(return_value={"chat_id": -100, "title": "Main"}))
+    monkeypatch.setattr(j.db, "upsert_user", AsyncMock())
+    monkeypatch.setattr(j.db, "delete_channel", AsyncMock())
+    assert await j.is_linked(-100) and not await j.is_linked(-200)
+    req = MagicMock(); req.chat.id = -200
+    await j.on_join_request(MagicMock(chat_join_request=req), None)
+    j.db.upsert_user.assert_not_called()
