@@ -2,7 +2,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from database import PERIOD_LABELS
 
-BACK = ("⬅️ Back", "adm:home")
+BACK = ("⬅️ Back", "adm:home", "danger")
 STYLES = {"none": "⚪ Default", "primary": "🔵 Blue", "success": "🟢 Green", "danger": "🔴 Red"}
 
 
@@ -17,16 +17,17 @@ def _build(rows: list[list[tuple]]) -> InlineKeyboardMarkup:
 
 def main_menu() -> InlineKeyboardMarkup:
     return _build([
-        [("✅ Non / Approve", "adm:mode")],
-        [("👋 Wlc Setting", "adm:wlc"), ("📢 Broadcast", "adm:bc")],
-        [("📊 Statistics", "adm:stats"), ("📡 Channels", "adm:channels")],
+        [("✅ Non / Approve", "adm:mode", "success")],
+        [("👋 Wlc Setting", "adm:wlc", "primary"), ("📢 Broadcast", "adm:bc", "success")],
+        [("📊 Statistics", "adm:stats", "success"), ("📡 Channels", "adm:channels", "primary")],
     ])
 
 
 def mode_menu(mode: str) -> InlineKeyboardMarkup:
     mark = lambda m: "✅ " if mode == m else ""
+    style = lambda m: "success" if mode == m else "primary"
     return _build([
-        [(f"{mark('non')}Non Approve", "mode:non"), (f"{mark('auto')}Auto Approve", "mode:auto")],
+        [(f"{mark('non')}Non Approve", "mode:non", style("non")), (f"{mark('auto')}Auto Approve", "mode:auto", style("auto"))],
         [BACK],
     ])
 
@@ -34,39 +35,39 @@ def mode_menu(mode: str) -> InlineKeyboardMarkup:
 # ---------- wlc setting ----------
 def wlc_menu() -> InlineKeyboardMarkup:
     return _build([
-        [("🚀 Start Msg", "cfg:start"), ("👋 Wlc Msg", "cfg:welcome")],
+        [("🚀 Start Msg", "cfg:start", "primary"), ("👋 Wlc Msg", "cfg:welcome", "success")],
         [BACK],
     ])
 
 
 def kind_menu(kind: str) -> InlineKeyboardMarkup:
     return _build([
-        [("📝 Set Text", f"txt:{kind}"), ("🖼 Set Media", f"med:{kind}")],
-        [("🔘 Set Button", f"btn:{kind}")],
+        [("📝 Set Text", f"txt:{kind}", "primary"), ("🖼 Set Media", f"med:{kind}", "primary")],
+        [("🔘 Set Button", f"btn:{kind}", "success")],
         [("👁 Preview", f"prv:{kind}", "primary"), ("♻️ Reset", f"rst:{kind}", "danger")],
-        [("⬅️ Back", "adm:wlc")],
+        [("⬅️ Back", "adm:wlc", "danger")],
     ])
 
 
 def back_to(data: str) -> InlineKeyboardMarkup:
-    return _build([[("⬅️ Back", data)]])
+    return _build([[("⬅️ Back", data, "danger")]])
 
 
 def media_menu(kind: str, has_media: bool) -> InlineKeyboardMarkup:
     rows = [[("🗑 Remove Media", f"medr:{kind}", "danger")]] if has_media else []
-    return _build(rows + [[("⬅️ Back", f"cfg:{kind}")]])
+    return _build(rows + [[("⬅️ Back", f"cfg:{kind}", "danger")]])
 
 
 def buttons_list(kind: str, labels: list[str]) -> InlineKeyboardMarkup:
-    rows = [[(f"{i + 1}. {label}", f"bte:{kind}:{i}")] for i, label in enumerate(labels)]
-    return _build(rows + [[("➕ Add Button", f"bta:{kind}", "success")], [("⬅️ Back", f"cfg:{kind}")]])
+    rows = [[(f"{i + 1}. {label}", f"bte:{kind}:{i}", "primary")] for i, label in enumerate(labels)]
+    return _build(rows + [[("➕ Add Button", f"bta:{kind}", "success")], [("⬅️ Back", f"cfg:{kind}", "danger")]])
 
 
 def button_menu(kind: str, i: int, sample: InlineKeyboardButton) -> InlineKeyboardMarkup:
     kb = _build([
-        [("✏️ Edit Name", f"bten:{kind}:{i}"), ("🔗 Edit Link", f"btel:{kind}:{i}")],
-        [("🎨 Edit Color", f"btec:{kind}:{i}"), ("🗑 Delete", f"btd:{kind}:{i}", "danger")],
-        [("⬅️ Back", f"btn:{kind}")],
+        [("✏️ Edit Name", f"bten:{kind}:{i}", "primary"), ("🔗 Edit Link", f"btel:{kind}:{i}", "primary")],
+        [("🎨 Edit Color", f"btec:{kind}:{i}", "success"), ("🗑 Delete", f"btd:{kind}:{i}", "danger")],
+        [("⬅️ Back", f"btn:{kind}", "danger")],
     ])
     kb.inline_keyboard.insert(0, [sample])
     return kb
@@ -74,25 +75,25 @@ def button_menu(kind: str, i: int, sample: InlineKeyboardButton) -> InlineKeyboa
 
 def color_menu(kind: str, i: int) -> InlineKeyboardMarkup:
     opts = [(label, f"btc:{kind}:{i}:{key}", *([key] if key != "none" else [])) for key, label in STYLES.items()]
-    return _build([opts[:2], opts[2:], [("⬅️ Back", f"bte:{kind}:{i}")]])
+    return _build([opts[:2], opts[2:], [("⬅️ Back", f"bte:{kind}:{i}", "danger")]])
 
 
 # ---------- broadcast / stats ----------
 def broadcast_menu(counts: dict[str, int]) -> InlineKeyboardMarkup:
-    btn = lambda p: (f"{PERIOD_LABELS[p]} ({counts[p]})", f"bc:{p}")
+    btn = lambda p, st: (f"{PERIOD_LABELS[p]} ({counts[p]})", f"bc:{p}", st)
     return _build([
-        [btn("24h"), btn("7d")],
-        [btn("30d"), btn("all")],
+        [btn("24h", "primary"), btn("7d", "success")],
+        [btn("30d", "success"), btn("all", "primary")],
         [BACK],
     ])
 
 
 def stats_menu() -> InlineKeyboardMarkup:
-    return _build([[("🔄 Refresh", "adm:stats")], [BACK]])
+    return _build([[("🔄 Refresh", "adm:stats", "success")], [BACK]])
 
 
 def cancel_menu() -> InlineKeyboardMarkup:
-    return _build([[("❌ Cancel", "adm:cancel")]])
+    return _build([[("❌ Cancel", "adm:cancel", "danger")]])
 
 
 def confirm_broadcast() -> InlineKeyboardMarkup:
