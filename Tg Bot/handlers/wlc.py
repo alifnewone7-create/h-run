@@ -124,15 +124,6 @@ async def cb_preview(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await cb.answer("👁 Preview sent")
 
 
-@admin_only
-async def cb_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    cb = update.callback_query
-    kind = _args(cb)[0]
-    await db.reset_msg(kind)
-    await show_kind(cb.message, kind)
-    await cb.answer("♻️ Reset to default")
-
-
 # ---------- text ----------
 @admin_only
 async def cb_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -385,7 +376,6 @@ def register_callbacks(app: Application) -> None:
         CallbackQueryHandler(cb_wlc, pattern=r"^adm:wlc$"),
         CallbackQueryHandler(cb_kind, pattern=r"^cfg:(start|welcome)$"),
         CallbackQueryHandler(cb_preview, pattern=r"^prv:"),
-        CallbackQueryHandler(cb_reset, pattern=r"^rst:"),
         CallbackQueryHandler(cb_text, pattern=r"^txt:"),
         CallbackQueryHandler(cb_media, pattern=r"^med:"),
         CallbackQueryHandler(cb_media_remove, pattern=r"^medr:"),

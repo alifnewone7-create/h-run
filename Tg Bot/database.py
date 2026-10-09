@@ -210,11 +210,6 @@ async def set_msg(kind: str, cfg: dict) -> None:
     await set_setting(f"msg:{kind}", json.dumps(cfg, ensure_ascii=False))
 
 
-async def reset_msg(kind: str) -> None:
-    keys = [f"msg:{kind}"] + (["welcome_text"] if kind == "welcome" else [])
-    await pool.execute("DELETE FROM settings WHERE key = ANY($1::text[])", keys)
-
-
 # ---------- statistics ----------
 def _cols(col: str, prefix: str) -> str:
     parts = [

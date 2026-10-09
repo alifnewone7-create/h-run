@@ -5,12 +5,11 @@ of the inline button. parse_button_name should only convert the emoji to the
 button's premium icon when it is at the START; otherwise the emoji stays in
 the text exactly where the admin typed it.
 """
-from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from telegram import CallbackQuery, Chat, Message, MessageEntity, Update, User
+from telegram import Chat, MessageEntity, Update, User
 from telegram.ext import Application
 
 
@@ -254,7 +253,6 @@ async def test_broadcast_add_button_leading_emoji_becomes_icon(monkeypatch):
 async def test_broadcast_preview_markup_has_emoji_in_button_text(monkeypatch):
     """After the full bc add flow with right-side emoji, cb_bc_done should
     build a reply_markup where the button text contains '🔥' and icon is None."""
-    import handlers.admin as admin_h
     from utils import build_markup, to_ptb
 
     buttons = [{"text": "Join 🔥", "icon": None, "alt": None,

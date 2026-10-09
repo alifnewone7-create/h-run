@@ -44,7 +44,7 @@ def kind_menu(kind: str) -> InlineKeyboardMarkup:
     return _build([
         [("📝 Set Text", f"txt:{kind}", "primary"), ("🖼 Set Media", f"med:{kind}", "primary")],
         [("🔘 Set Button", f"btn:{kind}", "success")],
-        [("👁 Preview", f"prv:{kind}", "primary"), ("♻️ Reset", f"rst:{kind}", "danger")],
+        [("👁 Preview", f"prv:{kind}", "primary")],
         [("⬅️ Back", "adm:wlc", "danger")],
     ])
 
