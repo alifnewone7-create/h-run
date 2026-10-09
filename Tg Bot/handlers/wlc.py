@@ -233,7 +233,8 @@ async def cb_button_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await safe_edit(
         cb.message,
         "➕ <b>New Button – Step 1/3</b>\n\nSend the button name.\n"
-        "Emoji are supported. A ✨ Premium emoji is shown as the button icon.",
+        "Emoji stay exactly where you put them. A ✨ Premium emoji at the <b>start</b> becomes the "
+        "premium button icon (Telegram always shows icons on the left).",
         kb.back_to(f"btn:{kind}"),
     )
     await cb.answer()
@@ -258,7 +259,8 @@ async def cb_button_field(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     set_state(ctx, "btn_name" if action == "bten" else "btn_url", kind=kind, idx=int(i))
     prompt = (
-        "✏️ Send the new button name (emoji and ✨ Premium emoji supported)."
+        "✏️ Send the new button name. Emoji stay where you put them; a ✨ Premium emoji at the "
+        "start becomes the button icon."
         if action == "bten"
         else "🔗 Send the new button link (https://... or t.me/...)."
     )

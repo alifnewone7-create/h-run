@@ -110,13 +110,14 @@ def extract_media(msg: Message) -> dict | None:
 
 
 def parse_button_name(msg: Message) -> tuple[str, str | None, str | None]:
-    # first premium emoji becomes the button icon, the rest stays as plain text
+    # Telegram shows the button icon only on the left, so only a leading premium emoji becomes the icon;
+    # anywhere else the emoji stays in place as a normal emoji
     text = msg.text or ""
     ce = next((e for e in msg.entities if e.type == "custom_emoji"), None)
-    if not ce:
-        return text.strip(), None, None
     raw = text.encode("utf-16-le")
-    start, end = ce.offset * 2, (ce.offset + ce.length) * 2
+    start, end = (ce.offset * 2, (ce.offset + ce.length) * 2) if ce else (0, 0)
+    if not ce or raw[:start].decode("utf-16-le").strip():
+        return text.strip(), None, None
     alt = raw[start:end].decode("utf-16-le")
     rest = (raw[:start] + raw[end:]).decode("utf-16-le").strip()
     return rest or alt, ce.custom_emoji_id, alt

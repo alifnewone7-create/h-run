@@ -42,7 +42,7 @@ Requires Python 3.10+.
 `/cancel` – cancel the current step.
 
 ## Premium (custom) emoji
-- Just type/paste Premium emoji into your message in Telegram (Set Text or Broadcast) – the bot stores them as `<tg-emoji emoji-id="...">` and sends them as Premium emoji. In a button name, the first Premium emoji becomes the button icon.
+- Just type/paste Premium emoji into your message in Telegram (Set Text or Broadcast) – the bot stores them as `<tg-emoji emoji-id="...">` and sends them as Premium emoji. In a button name, emoji stay exactly where you type them. A Premium emoji at the **start** of the name becomes the premium button icon – Telegram always draws button icons on the left, so a Premium emoji in the middle or at the end is kept in that position as its normal emoji.
 - Colored buttons use the Bot API `style` field (`primary` blue, `success` green, `danger` red); older Telegram apps show them in the default color.
 - Telegram rule (Bot API, Feb 2026): bots can send custom emoji in private chats/groups **only if the bot owner (the account that created the bot in @BotFather) has an active Telegram Premium subscription** (or the bot has a username bought on Fragment).
 - Without Premium, the bot automatically falls back to the regular emoji so the message is still delivered.

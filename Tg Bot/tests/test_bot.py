@@ -77,6 +77,19 @@ def test_parse_button_name_premium_icon():
     assert parse_button_name(_msg(text=" Plain ")) == ("Plain", None, None)
 
 
+def test_parse_button_name_keeps_emoji_position():
+    from utils import button_label, parse_button_name
+    right = _msg(text="Join 🔥", entities=(MessageEntity("custom_emoji", 5, 2, custom_emoji_id="9"),))
+    assert parse_button_name(right) == ("Join 🔥", None, None)
+    middle = _msg(text="Join 🔥 Now", entities=(MessageEntity("custom_emoji", 5, 2, custom_emoji_id="9"),))
+    assert parse_button_name(middle) == ("Join 🔥 Now", None, None)
+    lead = _msg(text=" 🔥 Join ⭐", entities=(
+        MessageEntity("custom_emoji", 1, 2, custom_emoji_id="9"), MessageEntity("custom_emoji", 9, 1, custom_emoji_id="8")))
+    name, icon, alt = parse_button_name(lead)
+    assert (name, icon, alt) == ("Join ⭐", "9", "🔥")
+    assert button_label({"text": "Join 🔥", "alt": None}) == "Join 🔥"
+
+
 def test_extract_media_photo():
     from utils import extract_media
     m = _msg(photo=(PhotoSize("a", "ua", 1, 1), PhotoSize("b", "ub", 2, 2)))
